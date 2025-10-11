@@ -443,6 +443,35 @@ resource oauthSecretSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (
   }
 }
 
+// Additional secrets for configuration management
+resource configChecksumSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (enableKeyVault) {
+  parent: keyVault
+  name: 'config-checksum'
+  properties: {
+    value: uniqueString(resourceGroup().id, environmentName, adminEmail)
+  }
+}
+
+resource adminEmailSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (enableKeyVault) {
+  parent: keyVault
+  name: 'admin-email'
+  properties: {
+    value: adminEmail
+  }
+}
+
+resource ttsAdminUsernameSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (enableKeyVault) {
+  parent: keyVault
+  name: 'tts-admin-username'
+  properties: {
+    value: ttsAdminUsername
+  }
+}
+
+// ============================================================================
+// RBAC - Key Vault Access for VM
+// ============================================================================
+
 resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableKeyVault) {
   name: guid(keyVault.id, vm.id, 'Key Vault Secrets User')
   scope: keyVault
@@ -682,11 +711,51 @@ runcmd:
   # Create necessary directories
   - mkdir -p /home/{0}/certs
   - mkdir -p /home/{0}/config
+  - mkdir -p /var/log/letsencrypt
   - chown -R {0}:{0} /home/{0}
   
-  # Generate self-signed certificate
-  - openssl req -x509 -newkey rsa:4096 -keyout /home/{0}/certs/key.pem -out /home/{0}/certs/cert.pem -days 365 -nodes -subj "/CN={1}" -addext "subjectAltName=DNS:{1},DNS:*.{1}"
-  - chown {0}:{0} /home/{0}/certs/*
+  # Certificate generation with Let's Encrypt
+  - |
+    echo "Setting up Let's Encrypt certificates..."
+    # Install certbot
+    snap install core
+    snap refresh core
+    snap install --classic certbot
+    ln -sf /snap/bin/certbot /usr/bin/certbot
+    
+    # Wait for DNS to propagate
+    echo "Waiting for DNS propagation for domain {1}..."
+    for i in $(seq 1 30); do
+      if nslookup {1} 8.8.8.8 | grep -q "Address:"; then
+        echo "DNS resolved successfully"
+        break
+      fi
+      echo "Waiting for DNS (attempt $i/30)..."
+      sleep 10
+    done
+    
+    # Obtain certificate using standalone mode (runs temporary web server on port 80)
+    echo "Obtaining Let's Encrypt certificate for {1}..."
+    certbot certonly --standalone --non-interactive --agree-tos --email {8} -d {1} --http-01-port 80 \
+      --pre-hook "systemctl stop docker || true" \
+      --post-hook "systemctl start docker || true"
+    
+    # Copy Let's Encrypt certificates
+    if [ -f /etc/letsencrypt/live/{1}/fullchain.pem ]; then
+      cp /etc/letsencrypt/live/{1}/fullchain.pem /home/{0}/certs/cert.pem
+      cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem
+      chown {0}:{0} /home/{0}/certs/*
+      chmod 644 /home/{0}/certs/cert.pem
+      chmod 600 /home/{0}/certs/key.pem
+      echo "✅ Let's Encrypt certificate installed"
+      
+      # Setup auto-renewal
+      echo "0 0,12 * * * root certbot renew --quiet --deploy-hook 'cp /etc/letsencrypt/live/{1}/fullchain.pem /home/{0}/certs/cert.pem && cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem && chown {0}:{0} /home/{0}/certs/* && chmod 644 /home/{0}/certs/cert.pem && chmod 600 /home/{0}/certs/key.pem && cd /home/{0} && docker-compose restart stack'" > /etc/cron.d/certbot-renew
+      echo "✅ Auto-renewal configured (runs twice daily)"
+    else
+      echo "❌ Let's Encrypt certificate generation failed!"
+      exit 1
+    fi
   
   # Add user to docker group
   - usermod -aG docker {0}
