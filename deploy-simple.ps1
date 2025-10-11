@@ -104,16 +104,15 @@ $keyVaultName = "kv-tts-$kvSuffix"
 Write-Host "Creating Key Vault: $keyVaultName" -ForegroundColor Cyan
 
 try {
+    # Create Key Vault - DON'T set any permissions here, let Bicep template handle it
     $kv = New-AzKeyVault `
         -Name $keyVaultName `
         -ResourceGroupName $resourceGroupName `
         -Location $Location `
-        -EnabledForTemplateDeployment `
-        -EnabledForDeployment `
-        -EnabledForDiskEncryption `
-        -SoftDeleteRetentionInDays 7
+        -SoftDeleteRetentionInDays 7 `
+        -EnablePurgeProtection:$false
     
-    Write-Host "✓ Key Vault created" -ForegroundColor Green
+    Write-Host "✓ Key Vault created (basic)" -ForegroundColor Green
 }
 catch {
     Write-Error "Failed to create Key Vault: $_"
@@ -121,7 +120,7 @@ catch {
 }
 
 # Wait for Key Vault to be ready
-Start-Sleep -Seconds 10
+Start-Sleep -Seconds 5
 
 # ============================================================================
 # STEP 4: ADD SECRETS TO KEY VAULT
@@ -129,31 +128,37 @@ Start-Sleep -Seconds 10
 
 Write-Host "`nSTEP 4: Adding Secrets to Key Vault`n" -ForegroundColor Yellow
 
-# Get current user for access policy
+# Get current user for access policy (using vault access policies, not RBAC)
 $currentUser = Get-AzContext
 $currentUserId = (Get-AzADUser -UserPrincipalName $currentUser.Account.Id -ErrorAction SilentlyContinue).Id
 
 if (-not $currentUserId) {
-    # Fallback to signed-in user object ID from token
-    $currentUserId = (Get-AzADUser -SignedIn).Id
+    # Fallback to signed-in user object ID
+    $currentUserId = (Get-AzADUser -SignedIn -ErrorAction SilentlyContinue).Id
 }
 
-# Set access policy for current user to manage secrets
-Write-Host "Setting Key Vault access policy..." -ForegroundColor Cyan
+if (-not $currentUserId) {
+    Write-Error "Could not determine current user object ID. Please ensure you're signed in with 'Connect-AzAccount'"
+    exit 1
+}
+
+# Set access policy for current user (Key Vault uses access policies by default)
+Write-Host "Setting Key Vault access policy for current user..." -ForegroundColor Cyan
+Write-Host "  User Object ID: $currentUserId" -ForegroundColor Gray
 try {
     Set-AzKeyVaultAccessPolicy `
         -VaultName $keyVaultName `
         -ObjectId $currentUserId `
-        -PermissionsToSecrets Get,List,Set,Delete,Recover,Backup,Restore,Purge `
-        -ErrorAction Stop | Out-Null
+        -PermissionsToSecrets Get,List,Set,Delete `
+        -ErrorAction Stop
     
     Write-Host "✓ Access policy set" -ForegroundColor Green
-    Write-Host "Waiting for permissions to propagate (60 seconds)..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 60  # Longer wait for policy propagation
+    Write-Host "Waiting for permissions to propagate..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 15
 }
 catch {
-    Write-Warning "Failed to set access policy: $_"
-    Write-Host "Attempting to continue..." -ForegroundColor Yellow
+    Write-Error "Failed to set access policy: $_"
+    exit 1
 }
 
 # Define all secrets
