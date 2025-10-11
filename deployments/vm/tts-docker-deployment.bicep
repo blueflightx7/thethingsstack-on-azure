@@ -537,7 +537,7 @@ write_files:
       services:
         stack:
           image: thethingsnetwork/lorawan-stack:latest
-          command: start
+          command: ttn-lw-stack -c /config/tts.yml start
           restart: unless-stopped
           depends_on:
             - redis
@@ -550,10 +550,10 @@ write_files:
             TTN_LW_BLOB_LOCAL_DIRECTORY: /srv/ttn-lorawan/public/blob
             TTN_LW_REDIS_ADDRESS: redis:6379
           ports:
-            - "80:1885"
-            - "443:8885"
-            - "1700:1700/udp"
-            - "8884:8884"
+            - 80:1885
+            - 443:8885
+            - 1700:1700/udp
+            - 8884:8884
         redis:
           image: redis:7
           command: redis-server --appendonly yes
@@ -738,11 +738,11 @@ runcmd:
       cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem
       chown {0}:{0} /home/{0}/certs/*
       chmod 644 /home/{0}/certs/cert.pem
-      chmod 600 /home/{0}/certs/key.pem
+      chmod 644 /home/{0}/certs/key.pem
       echo "✅ Let's Encrypt certificate installed"
       
       # Setup auto-renewal
-      echo "0 0,12 * * * root certbot renew --quiet --deploy-hook 'cp /etc/letsencrypt/live/{1}/fullchain.pem /home/{0}/certs/cert.pem && cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem && chown {0}:{0} /home/{0}/certs/* && chmod 644 /home/{0}/certs/cert.pem && chmod 600 /home/{0}/certs/key.pem && cd /home/{0} && docker-compose restart stack'" > /etc/cron.d/certbot-renew
+      echo "0 0,12 * * * root certbot renew --quiet --deploy-hook 'cp /etc/letsencrypt/live/{1}/fullchain.pem /home/{0}/certs/cert.pem && cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem && chown {0}:{0} /home/{0}/certs/* && chmod 644 /home/{0}/certs/cert.pem && chmod 644 /home/{0}/certs/key.pem && cd /home/{0} && docker-compose restart stack'" > /etc/cron.d/certbot-renew
       echo "✅ Auto-renewal configured (runs twice daily)"
     else
       echo "❌ Let's Encrypt certificate generation failed!"
