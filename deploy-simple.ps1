@@ -1,15 +1,20 @@
 #!/usr/bin/env pwsh
 # ==============================================================================
-# Simple TTS Deployment Script
-# Deploys The Things Stack to Azure with minimal prompts
+# TTS Azure Deployment Script
+# Deploys The Things Stack to Azure with proper orchestration:
+# 1. Collect parameters
+# 2. Create resource group
+# 3. Create Key Vault
+# 4. Add all secrets
+# 5. Confirm secrets
+# 6. Deploy template
 # ==============================================================================
 
 param(
     [string]$Location = "centralus",
     [string]$EnvironmentName = "tts-prod",
     [string]$AdminEmail = "",
-    [switch]$UseExistingKeyVault,
-    [string]$KeyVaultName = ""
+    [string]$DomainName = ""
 )
 
 # Set error action preference
@@ -17,11 +22,18 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "`n================================" -ForegroundColor Cyan
 Write-Host "  TTS Azure Deployment Script" -ForegroundColor Cyan
+Write-Host "  Let's Encrypt SSL Enabled" -ForegroundColor Cyan
 Write-Host "================================`n" -ForegroundColor Cyan
+
+# ============================================================================
+# STEP 1: COLLECT PARAMETERS
+# ============================================================================
+
+Write-Host "STEP 1: Collecting Parameters`n" -ForegroundColor Yellow
 
 # Prompt for admin email if not provided
 if ([string]::IsNullOrEmpty($AdminEmail)) {
-    $AdminEmail = Read-Host "Enter admin email address"
+    $AdminEmail = Read-Host "Enter admin email address (for Let's Encrypt & TTS admin)"
 }
 
 # Validate email format
@@ -30,29 +42,181 @@ if ($AdminEmail -notmatch '^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$') {
     exit 1
 }
 
-# Generate resource group name with timestamp
+# Prompt for domain name if not provided
+if ([string]::IsNullOrEmpty($DomainName)) {
+    Write-Host "`nDomain name (leave empty for auto-generated Azure domain):" -ForegroundColor Yellow
+    $DomainName = Read-Host
+}
+
+# Prompt for passwords securely
+Write-Host "`nEnter VM/Database admin password (alphanumeric only, 12+ chars):" -ForegroundColor Yellow
+$vmAdminPassword = Read-Host -AsSecureString
+
+Write-Host "Enter TTS admin password (for console login, 12+ chars):" -ForegroundColor Yellow
+$ttsAdminPassword = Read-Host -AsSecureString
+
+# Convert secure strings to plain text for Key Vault operations
+$BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($vmAdminPassword)
+$vmAdminPasswordPlain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+[System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+
+$BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ttsAdminPassword)
+$ttsAdminPasswordPlain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+[System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+
+# Generate cookie keys
+$cookieHashKey = -join ((0..63) | ForEach-Object { '{0:X}' -f (Get-Random -Maximum 16) })
+$cookieBlockKey = -join ((0..63) | ForEach-Object { '{0:X}' -f (Get-Random -Maximum 16) })
+
+# Generate OAuth client secret
+$oauthClientSecret = "console"
+
+# TTS admin username
+$ttsAdminUsername = "ttsadmin"
+
+# Generate checksum
+$checksum = -join ((0..31) | ForEach-Object { '{0:X}' -f (Get-Random -Maximum 16) })
+
+Write-Host "`n✓ Parameters collected" -ForegroundColor Green
+
+# ============================================================================
+# STEP 2: CREATE RESOURCE GROUP
+# ============================================================================
+
+Write-Host "`nSTEP 2: Creating Resource Group`n" -ForegroundColor Yellow
+
 $timestamp = Get-Date -Format "yyyyMMddHHmm"
 $resourceGroupName = "rg-tts-$timestamp"
 
-Write-Host "Creating resource group: $resourceGroupName" -ForegroundColor Yellow
+Write-Host "Creating resource group: $resourceGroupName" -ForegroundColor Cyan
 New-AzResourceGroup -Name $resourceGroupName -Location $Location -Force | Out-Null
+Write-Host "✓ Resource group created" -ForegroundColor Green
 
-# Generate or use existing Key Vault name
-if ([string]::IsNullOrEmpty($KeyVaultName)) {
-    $kvSuffix = -join ((48..57) + (97..102) | Get-Random -Count 8 | ForEach-Object {[char]$_})
-    $KeyVaultName = "kv-tts-$kvSuffix"
+# ============================================================================
+# STEP 3: CREATE KEY VAULT
+# ============================================================================
+
+Write-Host "`nSTEP 3: Creating Key Vault`n" -ForegroundColor Yellow
+
+$kvSuffix = -join ((48..57) + (97..102) | Get-Random -Count 8 | ForEach-Object {[char]$_})
+$keyVaultName = "kv-tts-$kvSuffix"
+
+Write-Host "Creating Key Vault: $keyVaultName" -ForegroundColor Cyan
+
+try {
+    $kv = New-AzKeyVault `
+        -Name $keyVaultName `
+        -ResourceGroupName $resourceGroupName `
+        -Location $Location `
+        -EnableRbacAuthorization `
+        -EnabledForTemplateDeployment `
+        -EnabledForDeployment `
+        -EnabledForDiskEncryption `
+        -SoftDeleteRetentionInDays 7
+    
+    Write-Host "✓ Key Vault created" -ForegroundColor Green
+}
+catch {
+    Write-Error "Failed to create Key Vault: $_"
+    exit 1
 }
 
-Write-Host "Key Vault: $KeyVaultName" -ForegroundColor Yellow
+# Wait for Key Vault to be ready
+Start-Sleep -Seconds 10
 
-# Prompt for passwords securely
-Write-Host "`nEnter VM admin password (for SSH access):" -ForegroundColor Yellow
-$vmAdminPassword = Read-Host -AsSecureString
+# ============================================================================
+# STEP 4: ADD SECRETS TO KEY VAULT
+# ============================================================================
 
-Write-Host "Enter TTS admin password (for console login):" -ForegroundColor Yellow
-$ttsAdminPassword = Read-Host -AsSecureString
+Write-Host "`nSTEP 4: Adding Secrets to Key Vault`n" -ForegroundColor Yellow
 
-# Prepare deployment parameters
+# Get current user for RBAC
+$currentUser = Get-AzContext
+$currentUserId = (Get-AzADUser -UserPrincipalName $currentUser.Account.Id -ErrorAction SilentlyContinue).Id
+
+if (-not $currentUserId) {
+    # Fallback to service principal or managed identity
+    $currentUserId = $currentUser.Account.Id
+}
+
+# Assign Key Vault Secrets Officer role
+Write-Host "Assigning Key Vault permissions..." -ForegroundColor Cyan
+try {
+    New-AzRoleAssignment `
+        -ObjectId $currentUserId `
+        -RoleDefinitionName "Key Vault Secrets Officer" `
+        -Scope $kv.ResourceId `
+        -ErrorAction SilentlyContinue | Out-Null
+    
+    Start-Sleep -Seconds 30  # Wait for RBAC propagation
+}
+catch {
+    Write-Host "  (Role may already exist)" -ForegroundColor Gray
+}
+
+# Define all secrets
+$secrets = @{
+    "db-password" = $vmAdminPasswordPlain
+    "tts-admin-password" = $ttsAdminPasswordPlain
+    "tts-admin-username" = $ttsAdminUsername
+    "cookie-hash-key" = $cookieHashKey
+    "cookie-block-key" = $cookieBlockKey
+    "oauth-client-secret" = $oauthClientSecret
+    "admin-email" = $AdminEmail
+    "checksum" = $checksum
+}
+
+# Add each secret
+foreach ($secretName in $secrets.Keys) {
+    try {
+        $secureValue = ConvertTo-SecureString -String $secrets[$secretName] -AsPlainText -Force
+        Set-AzKeyVaultSecret -VaultName $keyVaultName -Name $secretName -SecretValue $secureValue | Out-Null
+        Write-Host "  ✓ $secretName" -ForegroundColor Green
+    }
+    catch {
+        Write-Error "Failed to add secret '$secretName': $_"
+        exit 1
+    }
+}
+
+Write-Host "`n✓ All secrets added" -ForegroundColor Green
+
+# ============================================================================
+# STEP 5: CONFIRM SECRETS
+# ============================================================================
+
+Write-Host "`nSTEP 5: Confirming Secrets`n" -ForegroundColor Yellow
+
+Start-Sleep -Seconds 5
+
+try {
+    $storedSecrets = Get-AzKeyVaultSecret -VaultName $keyVaultName
+    
+    foreach ($secret in $storedSecrets) {
+        Write-Host "  ✓ $($secret.Name)" -ForegroundColor Green
+    }
+    
+    $expectedCount = $secrets.Count
+    $actualCount = $storedSecrets.Count
+    
+    if ($actualCount -eq $expectedCount) {
+        Write-Host "`n✓ All $actualCount secrets confirmed" -ForegroundColor Green
+    }
+    else {
+        Write-Warning "Expected $expectedCount secrets, found $actualCount"
+    }
+}
+catch {
+    Write-Error "Failed to confirm secrets: $_"
+    exit 1
+}
+
+# ============================================================================
+# STEP 6: DEPLOY TEMPLATE
+# ============================================================================
+
+Write-Host "`nSTEP 6: Deploying Infrastructure`n" -ForegroundColor Yellow
+
 $deploymentParams = @{
     ResourceGroupName     = $resourceGroupName
     TemplateFile          = ".\deployments\vm\tts-docker-deployment.bicep"
@@ -61,23 +225,36 @@ $deploymentParams = @{
     adminUsername         = "ttsadmin"
     adminPassword         = $vmAdminPassword
     adminEmail            = $AdminEmail
-    keyVaultName          = $KeyVaultName
+    keyVaultName          = $keyVaultName
     ttsAdminPasswordParam = $ttsAdminPassword
+    cookieHashKey         = $cookieHashKey
+    cookieBlockKey        = $cookieBlockKey
+    oauthClientSecret     = (ConvertTo-SecureString -String $oauthClientSecret -AsPlainText -Force)
     enableKeyVault        = $true
+    enablePrivateDatabaseAccess = $true
     Verbose               = $true
 }
 
-Write-Host "`nStarting deployment..." -ForegroundColor Green
-Write-Host "Resource Group: $resourceGroupName" -ForegroundColor Cyan
-Write-Host "Location: $Location" -ForegroundColor Cyan
-Write-Host "Environment: $EnvironmentName" -ForegroundColor Cyan
+if (-not [string]::IsNullOrEmpty($DomainName)) {
+    $deploymentParams.domainName = $DomainName
+}
+
+Write-Host "Starting template deployment..." -ForegroundColor Cyan
+Write-Host "  Resource Group: $resourceGroupName" -ForegroundColor Gray
+Write-Host "  Location: $Location" -ForegroundColor Gray
+Write-Host "  Environment: $EnvironmentName" -ForegroundColor Gray
+Write-Host "  Key Vault: $keyVaultName" -ForegroundColor Gray
+if ($DomainName) {
+    Write-Host "  Domain: $DomainName" -ForegroundColor Gray
+}
+Write-Host "`nThis will take 15-20 minutes...`n" -ForegroundColor Yellow
 
 try {
     $deployment = New-AzResourceGroupDeployment @deploymentParams
     
-    Write-Host "`n================================" -ForegroundColor Green
-    Write-Host "  Deployment Complete!" -ForegroundColor Green
-    Write-Host "================================`n" -ForegroundColor Green
+    Write-Host "`n╔══════════════════════════════════════════════════════════╗" -ForegroundColor Green
+    Write-Host "║              Deployment Complete!                        ║" -ForegroundColor Green
+    Write-Host "╚══════════════════════════════════════════════════════════╝`n" -ForegroundColor Green
     
     Write-Host "Console URL: " -NoNewline
     Write-Host $deployment.Outputs.consoleUrl.Value -ForegroundColor Yellow
@@ -97,12 +274,23 @@ try {
     Write-Host "gRPC API: " -NoNewline
     Write-Host $deployment.Outputs.grpcApiUrl.Value -ForegroundColor Cyan
     
-    Write-Host "`nNote: TTS is initializing in the background. Allow 5-10 minutes for full startup." -ForegroundColor Yellow
-    Write-Host "Monitor progress: " -NoNewline
-    Write-Host $deployment.Outputs.quickStartGuide.Value -ForegroundColor Cyan
+    Write-Host "`nKey Vault Details:" -ForegroundColor Cyan
+    Write-Host "  Name: $keyVaultName" -ForegroundColor Gray
+    Write-Host "  Secrets: $($secrets.Count)" -ForegroundColor Gray
+    
+    Write-Host "`nNext Steps:" -ForegroundColor Yellow
+    Write-Host "  1. Wait for cloud-init to complete (5-10 minutes)" -ForegroundColor White
+    Write-Host "  2. Let's Encrypt will obtain SSL certificates automatically" -ForegroundColor White
+    Write-Host "  3. Monitor progress: SSH to VM and run: docker logs lorawan-stack_stack_1 -f" -ForegroundColor White
+    Write-Host "  4. Access console at the URL above once ready" -ForegroundColor White
+    Write-Host "`n" -ForegroundColor White
 }
 catch {
-    Write-Host "`nDeployment failed!" -ForegroundColor Red
+    Write-Host "`n✗ Deployment failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
 }
+
+# Clean up sensitive variables
+Remove-Variable vmAdminPasswordPlain -ErrorAction SilentlyContinue
+Remove-Variable ttsAdminPasswordPlain -ErrorAction SilentlyContinue
