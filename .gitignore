@@ -1,0 +1,326 @@
+# ============================================================================
+# The Things Stack on Azure - .gitignore
+# Security-focused ignore patterns for Infrastructure as Code deployment
+# ============================================================================
+
+# ====================
+# SECURITY - SECRETS & CREDENTIALS (CRITICAL)
+# ====================
+# Never commit passwords, keys, certificates, or connection strings
+*.key
+*.pem
+*.crt
+*.cer
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.truststore
+
+# Azure credentials and service principal files
+.azure/credentials.json
+.azure/auth.json
+**/service-principal.json
+**/sp-credentials.json
+azureauth.json
+azure-credentials.json
+
+# SSH keys
+id_rsa
+id_rsa.pub
+id_dsa
+id_dsa.pub
+id_ecdsa
+id_ecdsa.pub
+id_ed25519
+id_ed25519.pub
+*.ppk
+
+# Environment files with secrets
+.env
+.env.*
+!.env.example
+!.env.template
+*.env.local
+*.env.production
+*.env.staging
+*.env.development
+
+# Parameter files with actual values (CRITICAL - see parameters-template.json for examples)
+parameters.json
+parameters-secure.json
+**/parameters.json
+**/parameters-secure.json
+**/test-params.json
+*.parameters.json
+*.parameters.*.json
+
+# Secret/config files
+secrets.json
+secrets.yml
+secrets.yaml
+config.production.json
+config.production.yml
+*.secret.*
+
+# Legacy parameter files
+thethingsstack-on-azure.parameters.json
+
+# ====================
+# GENERATED DEPLOYMENT ARTIFACTS
+# ====================
+# ARM templates compiled from Bicep (regenerate from source)
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!.vscode/*.json
+!**/parameters-template.json
+
+# Bicep build outputs
+**/bicep-build/
+**/arm-templates/
+
+# Terraform state files (if ever used)
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+
+# ====================
+# AZURE & CLOUD-INIT OUTPUTS
+# ====================
+# Cloud-init logs and debug output
+cloud-init-output.log
+cloud-init.log
+**/cloud-init-debug.log
+
+# Azure deployment outputs
+deployment-output.json
+deployment-result.json
+**/deployment-*.json
+
+# Let's Encrypt / certbot
+**/letsencrypt/
+**/certbot/
+live/
+archive/
+renewal/
+
+# ====================
+# DOCKER & CONTAINER ARTIFACTS
+# ====================
+# Docker Compose override files with actual values
+docker-compose.override.yml
+docker-compose.override.yaml
+docker-compose.production.yml
+docker-compose.local.yml
+
+# Docker volumes and data
+**/volumes/
+**/data/
+**/postgres-data/
+**/redis-data/
+
+# ====================
+# IDE & EDITOR FILES
+# ====================
+# Visual Studio Code
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+.vscode/*.code-workspace
+*.code-workspace
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# JetBrains IDEs (IntelliJ, PyCharm, etc.)
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.*.sw[a-p]
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# ====================
+# OPERATING SYSTEM FILES
+# ====================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ====================
+# BUILD & DEPENDENCIES
+# ====================
+# Node.js (if frontend tools used)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn/
+.pnp.*
+
+# Python (if scripts extended)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
+pip-log.txt
+
+# PowerShell
+*.ps1~
+
+# ====================
+# LOGS & TEMPORARY FILES
+# ====================
+# Log files
+*.log
+logs/
+*.log.*
+log/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.cache
+
+# Test outputs
+test-results/
+test-output/
+coverage/
+*.cover
+.coverage
+
+# ====================
+# BACKUP & ARCHIVE FILES
+# ====================
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*-backup/
+backup/
+backups/
+
+# ====================
+# SENSITIVE DOCUMENTATION (BE CAUTIOUS)
+# ====================
+# Remove documentation files that expose actual deployment details
+# (Listed for reference - review before uncommitting working configs)
+# WORKING-CONFIG-REFERENCE.md
+# deployment-notes-with-secrets.md
+
+# ====================
+# PROJECT-SPECIFIC EXCLUSIONS
+# ====================
+# Legacy/test files that contain real secrets (from security audit)
+config/docker-compose.yml
+config/docker-compose-enhanced.yml
+tts-fixed.yml
+
+# Compiled/generated Bicep outputs (regenerate from .bicep source)
+tts-docker-deployment.json
+deployments/vm/tts-docker-deployment.json
+deployments/vm/tts-docker-deployment-tti.json
+
+# ====================
+# ALLOWED FILES (EXPLICIT EXCEPTIONS)
+# ====================
+# Template/example files are OK
+!**/parameters-template.json
+!**/*.example.*
+!**/*.template.*
+!**/*.sample.*
+!.github/**
+
+# Documentation (ensure sanitized)
+!README.md
+!docs/**/*.md
+!LICENSE
+
+# ====================
+# AZURE SPECIFIC
+# ====================
+# Azure Functions (if used later)
+local.settings.json
+__blobstorage__/
+__queuestorage__/
+__azurite_db*__.json
+
+# Azure CLI local cache
+.azure/
+
+# ====================
+# GIT SPECIFIC
+# ====================
+# Git patch files
+*.patch
+*.diff
+
+# ====================
+# NOTES
+# ====================
+# This .gitignore follows security best practices:
+# 1. Never commit secrets, passwords, keys, or certificates
+# 2. Use parameter templates (parameters-template.json) with placeholders
+# 3. Store real values in Azure Key Vault or secure parameter files outside git
+# 4. Regenerate compiled artifacts (*.json from .bicep) from source
+# 5. Review any documentation files before committing to avoid leaked credentials
+#
+# For deployment:
+# - Copy parameters-template.json → parameters.json
+# - Fill in real values locally (ignored by git)
+# - Or use Key Vault references and secure parameters
+# ============================================================================
