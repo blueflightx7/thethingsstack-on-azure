@@ -104,62 +104,40 @@ $keyVaultName = "kv-tts-$kvSuffix"
 Write-Host "Creating Key Vault: $keyVaultName" -ForegroundColor Cyan
 
 try {
-    # Create Key Vault - DON'T set any permissions here, let Bicep template handle it
+    # Create Key Vault with current user as owner (simple, no RBAC)
+    $currentUser = Get-AzContext
+    $currentUserId = (Get-AzADUser -UserPrincipalName $currentUser.Account.Id -ErrorAction SilentlyContinue).Id
+    
+    if (-not $currentUserId) {
+        $currentUserId = (Get-AzADUser -SignedIn -ErrorAction SilentlyContinue).Id
+    }
+    
     $kv = New-AzKeyVault `
         -Name $keyVaultName `
         -ResourceGroupName $resourceGroupName `
         -Location $Location `
-        -SoftDeleteRetentionInDays 7 `
-        -EnablePurgeProtection:$false
+        -SoftDeleteRetentionInDays 7
     
-    Write-Host "✓ Key Vault created (basic)" -ForegroundColor Green
+    # Immediately set access policy during creation
+    Set-AzKeyVaultAccessPolicy `
+        -VaultName $keyVaultName `
+        -ObjectId $currentUserId `
+        -PermissionsToSecrets Get,List,Set,Delete `
+        -BypassObjectIdValidation
+    
+    Write-Host "✓ Key Vault created with access policy" -ForegroundColor Green
+    Start-Sleep -Seconds 5
 }
 catch {
     Write-Error "Failed to create Key Vault: $_"
     exit 1
 }
 
-# Wait for Key Vault to be ready
-Start-Sleep -Seconds 5
-
 # ============================================================================
 # STEP 4: ADD SECRETS TO KEY VAULT
 # ============================================================================
 
 Write-Host "`nSTEP 4: Adding Secrets to Key Vault`n" -ForegroundColor Yellow
-
-# Get current user for access policy (using vault access policies, not RBAC)
-$currentUser = Get-AzContext
-$currentUserId = (Get-AzADUser -UserPrincipalName $currentUser.Account.Id -ErrorAction SilentlyContinue).Id
-
-if (-not $currentUserId) {
-    # Fallback to signed-in user object ID
-    $currentUserId = (Get-AzADUser -SignedIn -ErrorAction SilentlyContinue).Id
-}
-
-if (-not $currentUserId) {
-    Write-Error "Could not determine current user object ID. Please ensure you're signed in with 'Connect-AzAccount'"
-    exit 1
-}
-
-# Set access policy for current user (Key Vault uses access policies by default)
-Write-Host "Setting Key Vault access policy for current user..." -ForegroundColor Cyan
-Write-Host "  User Object ID: $currentUserId" -ForegroundColor Gray
-try {
-    Set-AzKeyVaultAccessPolicy `
-        -VaultName $keyVaultName `
-        -ObjectId $currentUserId `
-        -PermissionsToSecrets Get,List,Set,Delete `
-        -ErrorAction Stop
-    
-    Write-Host "✓ Access policy set" -ForegroundColor Green
-    Write-Host "Waiting for permissions to propagate..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 15
-}
-catch {
-    Write-Error "Failed to set access policy: $_"
-    exit 1
-}
 
 # Define all secrets
 $secrets = @{
@@ -173,30 +151,16 @@ $secrets = @{
     "checksum" = $checksum
 }
 
-# Add each secret with retry logic
+# Add each secret
 foreach ($secretName in $secrets.Keys) {
-    $retryCount = 0
-    $maxRetries = 5
-    $success = $false
-    
-    while (-not $success -and $retryCount -lt $maxRetries) {
-        try {
-            $secureValue = ConvertTo-SecureString -String $secrets[$secretName] -AsPlainText -Force
-            Set-AzKeyVaultSecret -VaultName $keyVaultName -Name $secretName -SecretValue $secureValue -ErrorAction Stop | Out-Null
-            Write-Host "  ✓ $secretName" -ForegroundColor Green
-            $success = $true
-        }
-        catch {
-            $retryCount++
-            if ($retryCount -lt $maxRetries) {
-                Write-Host "  ⚠ $secretName (retry $retryCount/$maxRetries in 10s...)" -ForegroundColor Yellow
-                Start-Sleep -Seconds 10
-            }
-            else {
-                Write-Error "Failed to add secret '$secretName' after $maxRetries attempts: $_"
-                exit 1
-            }
-        }
+    try {
+        $secureValue = ConvertTo-SecureString -String $secrets[$secretName] -AsPlainText -Force
+        Set-AzKeyVaultSecret -VaultName $keyVaultName -Name $secretName -SecretValue $secureValue -ErrorAction Stop | Out-Null
+        Write-Host "  ✓ $secretName" -ForegroundColor Green
+    }
+    catch {
+        Write-Error "Failed to add secret '$secretName': $_"
+        exit 1
     }
 }
 
