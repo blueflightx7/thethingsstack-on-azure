@@ -526,10 +526,11 @@ package_upgrade: true
 packages:
   - docker.io
   - docker-compose
+  - postgresql-client
 
 write_files:
   - path: /home/{0}/docker-compose.yml
-    owner: {0}:{0}
+    owner: root:root
     permissions: '0644'
     content: |
       version: '3.7'
@@ -573,7 +574,7 @@ write_files:
           file: ./certs/key.pem
 
   - path: /home/{0}/config/tts.yml
-    owner: {0}:{0}
+    owner: root:root
     permissions: '0644'
     content: |
       # TTS Configuration File
