@@ -79,6 +79,24 @@ $checksum = -join ((0..31) | ForEach-Object { '{0:X}' -f (Get-Random -Maximum 16
 
 Write-Host "`n✓ Parameters collected" -ForegroundColor Green
 
+# Detect deployer's public IP for SSH access restriction
+Write-Host "`nDetecting your public IP for SSH access restriction..." -ForegroundColor Cyan
+try {
+    $deployerIP = (Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 10).ip
+    Write-Host "✓ Detected deployer IP: $deployerIP" -ForegroundColor Green
+    Write-Host "  SSH access will be restricted to this IP for security" -ForegroundColor Yellow
+} catch {
+    Write-Host "⚠ Could not detect public IP. SSH will default to ANY (not recommended for production)" -ForegroundColor Red
+    $response = Read-Host "Enter your public IP address manually (or press Enter to allow from ANY)"
+    if ($response) {
+        $deployerIP = $response
+        Write-Host "✓ Using IP: $deployerIP" -ForegroundColor Green
+    } else {
+        $deployerIP = "*"
+        Write-Host "⚠ WARNING: SSH will be accessible from ANY IP address" -ForegroundColor Red
+    }
+}
+
 # ============================================================================
 # STEP 2: CREATE RESOURCE GROUP
 # ============================================================================
@@ -226,6 +244,7 @@ $deploymentParams = @{
     adminUsername         = "ttsadmin"
     adminPassword         = $vmAdminPassword
     adminEmail            = $AdminEmail
+    adminSourceIP         = $deployerIP
     keyVaultName          = $keyVaultName
     ttsAdminPasswordParam = $ttsAdminPassword
     cookieHashKey         = $cookieHashKey
