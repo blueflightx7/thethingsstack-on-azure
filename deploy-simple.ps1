@@ -108,10 +108,10 @@ try {
         -Name $keyVaultName `
         -ResourceGroupName $resourceGroupName `
         -Location $Location `
-        -EnableRbacAuthorization `
-        -EnabledForTemplateDeployment `
-        -EnabledForDeployment `
-        -EnabledForDiskEncryption `
+        -EnableRbacAuthorization $true `
+        -EnabledForTemplateDeployment $true `
+        -EnabledForDeployment $true `
+        -EnabledForDiskEncryption $true `
         -SoftDeleteRetentionInDays 7
     
     Write-Host "✓ Key Vault created" -ForegroundColor Green
