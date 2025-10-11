@@ -108,10 +108,9 @@ try {
         -Name $keyVaultName `
         -ResourceGroupName $resourceGroupName `
         -Location $Location `
-        -EnableRbacAuthorization $true `
-        -EnabledForTemplateDeployment $true `
-        -EnabledForDeployment $true `
-        -EnabledForDiskEncryption $true `
+        -EnabledForTemplateDeployment `
+        -EnabledForDeployment `
+        -EnabledForDiskEncryption `
         -SoftDeleteRetentionInDays 7
     
     Write-Host "✓ Key Vault created" -ForegroundColor Green
@@ -130,28 +129,30 @@ Start-Sleep -Seconds 10
 
 Write-Host "`nSTEP 4: Adding Secrets to Key Vault`n" -ForegroundColor Yellow
 
-# Get current user for RBAC
+# Get current user for access policy
 $currentUser = Get-AzContext
 $currentUserId = (Get-AzADUser -UserPrincipalName $currentUser.Account.Id -ErrorAction SilentlyContinue).Id
 
 if (-not $currentUserId) {
-    # Fallback to service principal or managed identity
-    $currentUserId = $currentUser.Account.Id
+    # Fallback to signed-in user object ID from token
+    $currentUserId = (Get-AzADUser -SignedIn).Id
 }
 
-# Assign Key Vault Secrets Officer role
-Write-Host "Assigning Key Vault permissions..." -ForegroundColor Cyan
+# Set access policy for current user to manage secrets
+Write-Host "Setting Key Vault access policy..." -ForegroundColor Cyan
 try {
-    New-AzRoleAssignment `
+    Set-AzKeyVaultAccessPolicy `
+        -VaultName $keyVaultName `
         -ObjectId $currentUserId `
-        -RoleDefinitionName "Key Vault Secrets Officer" `
-        -Scope $kv.ResourceId `
-        -ErrorAction SilentlyContinue | Out-Null
+        -PermissionsToSecrets Get,List,Set,Delete,Recover,Backup,Restore,Purge `
+        -ErrorAction Stop | Out-Null
     
-    Start-Sleep -Seconds 30  # Wait for RBAC propagation
+    Write-Host "✓ Access policy set" -ForegroundColor Green
+    Start-Sleep -Seconds 5  # Brief wait for policy propagation
 }
 catch {
-    Write-Host "  (Role may already exist)" -ForegroundColor Gray
+    Write-Warning "Failed to set access policy: $_"
+    Write-Host "Attempting to continue..." -ForegroundColor Yellow
 }
 
 # Define all secrets
