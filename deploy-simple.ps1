@@ -148,7 +148,8 @@ try {
         -ErrorAction Stop | Out-Null
     
     Write-Host "✓ Access policy set" -ForegroundColor Green
-    Start-Sleep -Seconds 5  # Brief wait for policy propagation
+    Write-Host "Waiting for permissions to propagate (60 seconds)..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 60  # Longer wait for policy propagation
 }
 catch {
     Write-Warning "Failed to set access policy: $_"
@@ -167,16 +168,30 @@ $secrets = @{
     "checksum" = $checksum
 }
 
-# Add each secret
+# Add each secret with retry logic
 foreach ($secretName in $secrets.Keys) {
-    try {
-        $secureValue = ConvertTo-SecureString -String $secrets[$secretName] -AsPlainText -Force
-        Set-AzKeyVaultSecret -VaultName $keyVaultName -Name $secretName -SecretValue $secureValue | Out-Null
-        Write-Host "  ✓ $secretName" -ForegroundColor Green
-    }
-    catch {
-        Write-Error "Failed to add secret '$secretName': $_"
-        exit 1
+    $retryCount = 0
+    $maxRetries = 5
+    $success = $false
+    
+    while (-not $success -and $retryCount -lt $maxRetries) {
+        try {
+            $secureValue = ConvertTo-SecureString -String $secrets[$secretName] -AsPlainText -Force
+            Set-AzKeyVaultSecret -VaultName $keyVaultName -Name $secretName -SecretValue $secureValue -ErrorAction Stop | Out-Null
+            Write-Host "  ✓ $secretName" -ForegroundColor Green
+            $success = $true
+        }
+        catch {
+            $retryCount++
+            if ($retryCount -lt $maxRetries) {
+                Write-Host "  ⚠ $secretName (retry $retryCount/$maxRetries in 10s...)" -ForegroundColor Yellow
+                Start-Sleep -Seconds 10
+            }
+            else {
+                Write-Error "Failed to add secret '$secretName' after $maxRetries attempts: $_"
+                exit 1
+            }
+        }
     }
 }
 
