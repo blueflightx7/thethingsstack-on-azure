@@ -537,14 +537,13 @@ write_files:
       services:
         stack:
           image: thethingsnetwork/lorawan-stack:latest
-          entrypoint: sh -c 'cp /certs/cert.pem /run/secrets/cert.pem && cp /certs/key.pem /run/secrets/key.pem && ttn-lw-stack start'
           command: start
           restart: unless-stopped
           depends_on:
             - redis
           volumes:
             - ./config:/config:ro
-            - ./certs:/certs:ro
+            - ./certs:/run/secrets:ro
             - stack_data:/srv/ttn-lorawan/public
           environment:
             TTS_DOMAIN: {1}
@@ -555,9 +554,6 @@ write_files:
             - "443:8885"
             - "1700:1700/udp"
             - "8884:8884"
-          secrets:
-            - cert.pem
-            - key.pem
         redis:
           image: redis:7
           command: redis-server --appendonly yes
@@ -567,11 +563,6 @@ write_files:
       volumes:
         redis_data:
         stack_data:
-      secrets:
-        cert.pem:
-          file: ./certs/cert.pem
-        key.pem:
-          file: ./certs/key.pem
 
   - path: /home/{0}/config/tts.yml
     owner: root:root
@@ -774,35 +765,35 @@ runcmd:
   
   # FIX #9: Wait for containers to be healthy
   - echo "Waiting for TTS container to be healthy..."
-  - for i in $(seq 1 20); do docker inspect --format='{6}' lorawan-stack_stack_1 2>/dev/null | grep -q "healthy" && break || (echo "Waiting for container health (attempt $i/20)..."; sleep 10); done
+  - for i in $(seq 1 20); do docker inspect --format='{6}' {0}_stack_1 2>/dev/null | grep -q "healthy" && break || (echo "Waiting for container health (attempt $i/20)..."; sleep 10); done
   
   # FIX #9: Initialize database schema with retry
   - echo "Initializing TTS database schema..."
   - sleep 10
-  - for i in $(seq 1 5); do docker exec lorawan-stack_stack_1 ttn-lw-stack -c /config/tts.yml is-db init && break || (echo "Database init attempt $i failed, retrying..."; sleep 5); done
+  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db init && break || (echo "Database init attempt $i failed, retrying..."; sleep 5); done
   
   # Run database migrations
   - echo "Running database migrations..."
   - sleep 5
-  - docker exec lorawan-stack_stack_1 ttn-lw-stack -c /config/tts.yml is-db migrate || echo "Database migration failed again"
+  - docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db migrate || echo "Database migration failed again"
   
   # FIX #11: Wait for TTS container to be fully ready before creating admin user
   - echo "Waiting for TTS container to be fully ready..."
   - sleep 30
-  - for i in $(seq 1 10); do docker exec lorawan-stack_stack_1 ttn-lw-stack -c /config/tts.yml is-db --help >/dev/null 2>&1 && break || (echo "Waiting for TTS to be ready (attempt $i/10)..."; sleep 10); done
+  - for i in $(seq 1 10); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db --help >/dev/null 2>&1 && break || (echo "Waiting for TTS to be ready (attempt $i/10)..."; sleep 10); done
   
   # FIX #10 & #11: Create admin user with retry logic (password must be provided twice for confirmation)
   - echo "Creating admin user..."
-  - for i in $(seq 1 5); do printf '%s\n%s\n' '{9}' '{9}' | docker exec -i lorawan-stack_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-admin-user --id {10} --email {8} && break || (echo "Admin user creation attempt $i failed, retrying in 10 seconds..."; sleep 10); done
+  - for i in $(seq 1 5); do printf '%s\n%s\n' '{9}' '{9}' | docker exec -i {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-admin-user --id {10} --email {8} && break || (echo "Admin user creation attempt $i failed, retrying in 10 seconds..."; sleep 10); done
   
   # FIX #8 & #9: Create OAuth client for console with retry logic (single redirect URI)
   - echo "Creating OAuth client for console..."
   - sleep 5
-  - for i in $(seq 1 5); do docker exec lorawan-stack_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-oauth-client --id console --name 'Console' --secret 'console' --owner {10} --redirect-uri '/console/oauth/callback' --logout-redirect-uri '/console' && break || (echo "OAuth client creation attempt $i failed, retrying..."; sleep 5); done
+  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-oauth-client --id console --name 'Console' --secret 'console' --owner {10} --redirect-uri '/console/oauth/callback' --logout-redirect-uri '/console' && break || (echo "OAuth client creation attempt $i failed, retrying..."; sleep 5); done
   
   # Final verification of complete setup
   - echo "Performing final database verification..."
-  - docker exec lorawan-stack_stack_1 ttn-lw-stack is-db --help >/dev/null 2>&1 && echo "✅ Database initialization completed successfully" || echo "❌ Database initialization may have issues"
+  - docker exec {0}_stack_1 ttn-lw-stack is-db --help >/dev/null 2>&1 && echo "✅ Database initialization completed successfully" || echo "❌ Database initialization may have issues"
   - echo "TTS should be ready for login with the admin user created with ID {10}"
   - echo "Admin Username {10}"
   - echo "Console URL https://{1}/console"
@@ -854,7 +845,7 @@ output adminCredentials object = {
   email: adminEmail
   consoleUrl: 'https://${actualDomainName}/console'
 }
-output quickStartGuide string = 'SSH to ${pip.properties.ipAddress} and run: docker logs lorawan-stack_stack_1 -f to monitor deployment progress'
+output quickStartGuide string = 'SSH to ${pip.properties.ipAddress} and run: docker logs ${adminUsername}_stack_1 -f to monitor deployment progress'
 output logAnalyticsWorkspaceId string = logAnalytics.id
 output applicationInsightsInstrumentationKey string = appInsights.properties.InstrumentationKey
 output applicationInsightsConnectionString string = appInsights.properties.ConnectionString
