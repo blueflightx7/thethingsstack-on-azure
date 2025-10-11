@@ -767,15 +767,10 @@ runcmd:
   - echo "Waiting for TTS container to be healthy..."
   - for i in $(seq 1 20); do docker inspect --format='{6}' {0}_stack_1 2>/dev/null | grep -q "healthy" && break || (echo "Waiting for container health (attempt $i/20)..."; sleep 10); done
   
-  # FIX #9: Initialize database schema with retry
-  - echo "Initializing TTS database schema..."
+  # FIX #12: Database migration (init command is deprecated)
+  - echo "Running TTS database migrations..."
   - sleep 10
-  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db init && break || (echo "Database init attempt $i failed, retrying..."; sleep 5); done
-  
-  # Run database migrations
-  - echo "Running database migrations..."
-  - sleep 5
-  - docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db migrate || echo "Database migration failed again"
+  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db migrate && break || (echo "Database migration attempt $i failed, retrying..."; sleep 5); done
   
   # FIX #11: Wait for TTS container to be fully ready before creating admin user
   - echo "Waiting for TTS container to be fully ready..."
