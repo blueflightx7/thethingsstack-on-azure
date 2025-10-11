@@ -777,9 +777,9 @@ runcmd:
   - sleep 30
   - for i in $(seq 1 10); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db --help >/dev/null 2>&1 && break || (echo "Waiting for TTS to be ready (attempt $i/10)..."; sleep 10); done
   
-  # FIX #10 & #11: Create admin user with retry logic (password must be provided twice for confirmation)
+  # FIX #10 & #11: Create admin user with retry logic using --password flag
   - echo "Creating admin user..."
-  - for i in $(seq 1 5); do printf '%s\n%s\n' '{9}' '{9}' | docker exec -i {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-admin-user --id {10} --email {8} && break || (echo "Admin user creation attempt $i failed, retrying in 10 seconds..."; sleep 10); done
+  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-admin-user --id {10} --email {8} --password '{9}' && break || (echo "Admin user creation attempt $i failed, retrying in 10 seconds..."; sleep 10); done
   
   # FIX #8 & #9: Create OAuth client for console with retry logic (single redirect URI)
   - echo "Creating OAuth client for console..."
