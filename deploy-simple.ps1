@@ -119,14 +119,13 @@ try {
     
     Write-Host "  Current User ID: $currentUserId" -ForegroundColor Gray
     
-    # Create Key Vault with RBAC enabled (matching the working deployment)
+    # Create Key Vault (RBAC is enabled by default)
     New-AzKeyVault `
         -Name $keyVaultName `
         -ResourceGroupName $resourceGroupName `
         -Location $Location `
-        -EnableRbacAuthorization $true `
-        -EnabledForTemplateDeployment $true `
-        -EnabledForDeployment $true `
+        -EnabledForTemplateDeployment `
+        -EnabledForDeployment `
         -SoftDeleteRetentionInDays 7 | Out-Null
     
     Write-Host "✓ Key Vault created with RBAC" -ForegroundColor Green
