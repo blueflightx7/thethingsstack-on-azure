@@ -104,7 +104,7 @@ $keyVaultName = "kv-tts-$kvSuffix"
 Write-Host "Creating Key Vault: $keyVaultName" -ForegroundColor Cyan
 
 try {
-    # Create Key Vault with current user as owner (simple, no RBAC)
+    # Get current user object ID for RBAC
     $currentUser = Get-AzContext
     $currentUserId = (Get-AzADUser -UserPrincipalName $currentUser.Account.Id -ErrorAction SilentlyContinue).Id
     
@@ -112,21 +112,38 @@ try {
         $currentUserId = (Get-AzADUser -SignedIn -ErrorAction SilentlyContinue).Id
     }
     
-    $kv = New-AzKeyVault `
+    if (-not $currentUserId) {
+        Write-Error "Could not determine current user object ID"
+        exit 1
+    }
+    
+    Write-Host "  Current User ID: $currentUserId" -ForegroundColor Gray
+    
+    # Create Key Vault with RBAC enabled (matching the working deployment)
+    New-AzKeyVault `
         -Name $keyVaultName `
         -ResourceGroupName $resourceGroupName `
         -Location $Location `
-        -SoftDeleteRetentionInDays 7
+        -EnableRbacAuthorization $true `
+        -EnabledForTemplateDeployment $true `
+        -EnabledForDeployment $true `
+        -SoftDeleteRetentionInDays 7 | Out-Null
     
-    # Immediately set access policy during creation
-    Set-AzKeyVaultAccessPolicy `
-        -VaultName $keyVaultName `
+    Write-Host "✓ Key Vault created with RBAC" -ForegroundColor Green
+    
+    # Assign Key Vault Secrets Officer role to current user
+    Write-Host "Assigning Key Vault Secrets Officer role..." -ForegroundColor Cyan
+    
+    $kvResourceId = (Get-AzKeyVault -VaultName $keyVaultName -ResourceGroupName $resourceGroupName).ResourceId
+    
+    New-AzRoleAssignment `
         -ObjectId $currentUserId `
-        -PermissionsToSecrets Get,List,Set,Delete `
-        -BypassObjectIdValidation
+        -RoleDefinitionName "Key Vault Secrets Officer" `
+        -Scope $kvResourceId | Out-Null
     
-    Write-Host "✓ Key Vault created with access policy" -ForegroundColor Green
-    Start-Sleep -Seconds 5
+    Write-Host "✓ RBAC role assigned" -ForegroundColor Green
+    Write-Host "Waiting for RBAC propagation (30 seconds)..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 30
 }
 catch {
     Write-Error "Failed to create Key Vault: $_"
