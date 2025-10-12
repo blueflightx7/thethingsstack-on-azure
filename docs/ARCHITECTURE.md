@@ -27,9 +27,9 @@ _Last updated: October 11, 2025_
 - [Operations & Maintenance](#8-operations--maintenance)
 - [Scaling & Performance](#9-scaling--performance)
 - [Cost Optimization](#10-cost-optimization)
-- [Disaster Recovery](#11-disaster-recovery)
-- [Future Roadmap](#12-future-roadmap)
-- [Appendix](#13-appendix)
+- [Future Enhancements](#11-future-enhancements)
+- [Appendix](#12-appendix)
+- [AKS Production Architecture](#13-aks-production-architecture-kubernetes-deployment)
 
 ---
 
@@ -2510,6 +2510,912 @@ docker compose exec stack ttn-lw-stack is-db migrate
 
 ---
 
+## 13. AKS Production Architecture (Kubernetes Deployment)
+
+This section provides detailed architecture documentation for the production-scale Azure Kubernetes Service (AKS) deployment mode. The AKS deployment is designed for high-availability, scalability, and production workloads supporting 100,000+ devices.
+
+### 13.1. Overview - AKS vs VM Deployment
+
+The AKS deployment provides a fundamentally different architecture compared to the VM-based deployment:
+
+| Aspect | VM Deployment | AKS Deployment |
+|--------|---------------|----------------|
+| **Orchestration** | Docker Compose on single VM | Kubernetes on multi-node cluster |
+| **Scalability** | Vertical (upgrade VM) | Horizontal (add nodes/pods) |
+| **High Availability** | Single VM (no HA) | Zone-redundant nodes + replicas |
+| **Redis** | Container on VM | Azure Cache for Redis (planned) or StatefulSet |
+| **PostgreSQL** | Azure Database with public endpoint | Azure Database with private endpoint |
+| **Ingress** | Direct VM access + Let's Encrypt | Kubernetes Ingress Controller |
+| **TLS Management** | Manual certbot renewal | cert-manager (automated) |
+| **Cost** | ~$205/month | ~$675/month |
+| **Ideal For** | Dev/test, PoC, <10K devices | Production, >100K devices, HA required |
+
+### 13.2. Infrastructure Components
+
+The AKS deployment (defined in `deployments/kubernetes/tts-aks-deployment.bicep`) provisions the following Azure resources:
+
+#### 13.2.1. Networking Foundation
+
+**Virtual Network**:
+```bicep
+Address Space: 10.0.0.0/16
+├── AKS Subnet: 10.0.0.0/22 (1,024 IPs - supports scaling)
+└── Database Subnet: 10.0.4.0/24 (256 IPs - delegated to PostgreSQL)
+```
+
+**Network Security Group** (applied to AKS subnet):
+- **SSH**: TCP 22 from admin IP (restricted)
+- **HTTPS**: TCP 443 from * (public ingress)
+- **HTTP**: TCP 80 from * (Let's Encrypt validation)
+- **LoRaWAN UDP**: UDP 1700 from * (gateway traffic)
+- **gRPC**: TCP 1881-1887 from * (TTS microservices)
+
+**Key Networking Features**:
+- **Azure CNI**: Each pod gets IP from AKS subnet (10.0.0.0/22)
+- **Network Policy**: Azure Network Policy for pod-to-pod rules
+- **Service CIDR**: 10.1.0.0/16 (internal cluster services)
+- **DNS Service IP**: 10.1.0.10 (CoreDNS)
+- **Load Balancer**: Standard SKU with static public IP
+
+#### 13.2.2. AKS Cluster Configuration
+
+**Cluster Specifications**:
+```yaml
+Kubernetes Version: 1.28.x (configurable)
+Node Pool: nodepool1 (System + workload)
+  VM Size: Standard_D4s_v3 (4 vCPU, 16 GB RAM)
+  Initial Count: 3 nodes
+  Auto-scaling: Enabled (min: 2, max: 10)
+  Availability Zones: [1, 2, 3] (zone-redundant)
+  Max Pods per Node: 110
+```
+
+**Managed Identity**:
+- System-assigned identity for AKS cluster
+- Automatic RBAC assignments:
+  - **ACR Pull**: Read container images from Azure Container Registry
+  - **Key Vault Secrets User**: Read secrets (DB password, admin credentials)
+
+**Add-ons Enabled**:
+- **Azure Monitor (omsagent)**: Container logs → Log Analytics
+- **Azure Policy**: Governance and compliance enforcement
+
+#### 13.2.3. Azure Container Registry (ACR)
+
+**Purpose**: Store TTS container images and custom images
+
+```yaml
+SKU: Standard
+Public Access: Enabled (can be restricted to AKS subnet)
+Admin User: Enabled (for initial setup)
+Integration: AKS kubelet identity has AcrPull role
+```
+
+**Usage**:
+```bash
+# Build and push TTS images
+az acr build --registry <acr-name> --image tts-stack:latest .
+```
+
+#### 13.2.4. PostgreSQL Flexible Server (Zone-Redundant)
+
+**Database Configuration**:
+```yaml
+SKU: Standard_D4s_v3 (4 vCPU, 16 GB RAM)
+Tier: GeneralPurpose
+Version: PostgreSQL 15
+Storage: 128 GB (auto-grow enabled)
+Backup: 7-day retention, geo-redundant
+High Availability: ZoneRedundant (standby in Zone 2)
+```
+
+**Private Networking** (CRITICAL):
+```
+PostgreSQL Server
+└── Delegated Subnet: 10.0.4.0/24 (vnet-integrated)
+    └── Private DNS Zone: privatelink.postgres.database.azure.com
+        └── Linked to VNet (10.0.0.0/16)
+```
+
+**How AKS Accesses PostgreSQL**:
+1. TTS pods run in AKS subnet (10.0.0.0/22)
+2. Database connection string uses FQDN: `<server>.postgres.database.azure.com`
+3. Private DNS zone resolves to private IP in database subnet (10.0.4.x)
+4. **No public endpoint** - traffic stays within VNet
+5. Connection string stored in Key Vault (retrieved via CSI driver or environment variables)
+
+**Database Created**:
+- **Name**: `tts`
+- **Charset**: UTF8
+- **Collation**: en_US.utf8
+
+#### 13.2.5. Key Vault (Secrets Management)
+
+**Configuration**:
+```yaml
+SKU: Standard
+RBAC: Enabled (no access policies)
+Public Access: Enabled (can be restricted)
+Integration: AKS system identity has Key Vault Secrets User role
+```
+
+**Secrets Stored**:
+- `db-password`: PostgreSQL admin password
+- `tts-admin-password`: TTS console admin password
+- `admin-email`: TTS admin email
+
+**Access from AKS** (planned implementation):
+```yaml
+# Option 1: Azure Key Vault Provider for Secrets Store CSI Driver
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: tts-secrets
+spec:
+  provider: azure
+  parameters:
+    keyvaultName: <keyvault-name>
+    tenantId: <tenant-id>
+    objects: |
+      array:
+        - objectName: db-password
+          objectType: secret
+
+# Option 2: Environment variables from external secrets
+# (requires azure-workload-identity or pod identity)
+```
+
+#### 13.2.6. Monitoring Stack
+
+**Log Analytics Workspace**:
+- Centralized log collection for AKS containers
+- Retention: 30 days
+- Cost: ~$2.30 per GB ingested
+
+**Application Insights**:
+- Application performance monitoring (APM)
+- Custom metrics and traces
+- Connection string stored as output
+
+**Container Insights**:
+- Enabled via AKS addon (omsagent)
+- Metrics: CPU, memory, pod count, node health
+- Logs: stdout/stderr from all containers
+
+### 13.3. Ingress & External Access Architecture
+
+**CURRENT STATE**: The deployed Bicep template creates the foundation but **does not include an Ingress Controller**. This section documents the planned architecture.
+
+#### 13.3.1. Traffic Flow (Planned)
+
+```
+Internet
+  │
+  ├─► TCP 443 (HTTPS) ───► Azure Load Balancer (Standard, Public IP)
+  │                          │
+  │                          ├─► Ingress Controller (nginx or App Gateway)
+  │                          │     │
+  │                          │     ├─► Service: tts-frontend (ClusterIP)
+  │                          │     │     └─► Pods: TTS Console UI
+  │                          │     │
+  │                          │     ├─► Service: tts-server (ClusterIP)
+  │                          │     │     └─► Pods: TTS Network Server
+  │                          │     │
+  │                          │     └─► Service: tts-grpc (ClusterIP)
+  │                          │           └─► Pods: TTS gRPC endpoints
+  │
+  └─► UDP 1700 (LoRaWAN) ──► Service: gateway-server (LoadBalancer)
+                                └─► Pods: TTS Gateway Server
+```
+
+#### 13.3.2. Ingress Controller Options
+
+**Option A: NGINX Ingress Controller** (Recommended for most deployments)
+
+```bash
+# Install with Helm
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm install nginx-ingress ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx --create-namespace \
+  --set controller.service.loadBalancerIP=<reserved-ip>
+```
+
+**Advantages**:
+- Simple configuration
+- Cost-effective (~$30/month for LB)
+- Works with any DNS provider
+- Good documentation
+
+**Option B: Application Gateway Ingress Controller (AGIC)** (Azure-native)
+
+```bash
+# Enable AGIC addon
+az aks enable-addons -g <rg> -n <aks-name> \
+  --addon ingress-appgw \
+  --appgw-name <appgw-name> \
+  --appgw-subnet-cidr 10.0.5.0/24
+```
+
+**Advantages**:
+- Azure-native integration
+- WAF capabilities (protect against attacks)
+- Better performance for Azure-to-Azure traffic
+- Automatic TLS offload
+
+**Disadvantages**:
+- Higher cost (~$150/month for Application Gateway)
+- More complex configuration
+
+#### 13.3.3. TLS/Certificate Management
+
+**Planned: cert-manager with Let's Encrypt**
+
+```yaml
+# Install cert-manager
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+
+# Create Let's Encrypt ClusterIssuer
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: <admin-email>
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+```
+
+**Ingress with TLS**:
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tts-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - tts.yourdomain.com
+    secretName: tts-tls-cert
+  rules:
+  - host: tts.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tts-frontend
+            port:
+              number: 443
+```
+
+**Certificate Lifecycle**:
+1. cert-manager watches Ingress with `cert-manager.io/cluster-issuer` annotation
+2. Creates Certificate resource automatically
+3. Initiates ACME challenge with Let's Encrypt
+4. Let's Encrypt validates domain ownership (HTTP-01 via port 80)
+5. Certificate issued and stored in Kubernetes Secret (`tts-tls-cert`)
+6. Auto-renewal 30 days before expiration
+
+#### 13.3.4. LoRaWAN Gateway UDP Traffic
+
+**Special Handling** (UDP port 1700):
+
+LoRaWAN gateways communicate via UDP (not HTTP), requiring a separate LoadBalancer Service:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-server-udp
+  namespace: tts
+spec:
+  type: LoadBalancer
+  loadBalancerIP: <reserved-static-ip>  # Optional
+  ports:
+  - name: lorawan-udp
+    port: 1700
+    targetPort: 1700
+    protocol: UDP
+  selector:
+    app: tts-gateway-server
+```
+
+**Why separate from Ingress?**:
+- Ingress Controllers handle HTTP/HTTPS only
+- UDP requires Layer 4 load balancing (Azure Standard LB)
+- Gateway traffic bypasses Ingress → goes directly to gateway-server pods
+
+### 13.4. Redis Architecture (Planned)
+
+**CURRENT STATE**: No Redis deployment in current Bicep template. Two options are available:
+
+#### 13.4.1. Option A: Azure Cache for Redis (Managed Service - Recommended)
+
+**Configuration**:
+```yaml
+SKU: Premium P1 (6 GB cache)
+Version: Redis 6.x
+Features:
+  - VNet Injection (into 10.0.6.0/24 subnet)
+  - Zone redundancy
+  - Data persistence (RDB/AOF)
+  - 99.95% SLA
+Cost: ~$200/month
+```
+
+**Bicep Addition Required**:
+```bicep
+resource redisCache 'Microsoft.Cache/redis@2023-08-01' = {
+  name: redisCacheName
+  location: location
+  properties: {
+    sku: {
+      name: 'Premium'
+      family: 'P'
+      capacity: 1
+    }
+    enableNonSslPort: false
+    minimumTlsVersion: '1.2'
+    redisVersion: '6'
+    subnetId: vnet.properties.subnets[2].id  // New Redis subnet
+    publicNetworkAccess: 'Disabled'
+  }
+}
+```
+
+**Access from AKS**:
+```yaml
+# TTS pod connects via private endpoint
+redis:
+  host: <cache-name>.redis.cache.windows.net
+  port: 6380
+  tls: true
+  password: <from-key-vault>
+```
+
+**Advantages**:
+- Fully managed (no maintenance)
+- High availability (zone-redundant)
+- Automatic backups
+- Scaling without pod restarts
+
+**Disadvantages**:
+- Additional cost (~$200/month)
+- Requires VNet subnet for injection
+
+#### 13.4.2. Option B: Redis StatefulSet in AKS (Self-Managed)
+
+**Kubernetes Deployment**:
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: tts
+spec:
+  serviceName: redis
+  replicas: 3  # Master + 2 replicas
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: managed-csi-premium  # Azure Premium SSD
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: tts
+spec:
+  clusterIP: None  # Headless service
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+```
+
+**Access from TTS**:
+```yaml
+# Connection string
+redis:
+  host: redis-0.redis.tts.svc.cluster.local
+  port: 6379
+  tls: false  # Internal cluster traffic
+```
+
+**Advantages**:
+- Lower cost (only storage + compute already in cluster)
+- Full control over configuration
+- No VNet subnet required
+
+**Disadvantages**:
+- Manual maintenance (upgrades, backups)
+- Requires StatefulSet expertise
+- No built-in zone redundancy (need Redis Sentinel for HA)
+
+#### 13.4.3. Recommended Approach
+
+**For Production**: Use **Azure Cache for Redis Premium** with VNet injection
+- Justification: The cost difference (~$200/month) is worth the operational simplicity, HA guarantees, and reduced operational burden for production deployments supporting 100K+ devices.
+
+**For Dev/Test AKS**: Use **StatefulSet** if cost is a concern
+- Justification: Acceptable risk for non-production environments.
+
+### 13.5. PostgreSQL Private Access Architecture
+
+**Current Implementation**: Fully functional private access via VNet integration.
+
+#### 13.5.1. Network Path Diagram
+
+```
+TTS Pod (10.0.2.45)                           PostgreSQL Server
+  │                                             │
+  │ Connection: postgresql://ttsadmin@<fqdn>  │
+  │                                             │
+  ├──► DNS Query: <server>.postgres.database.azure.com
+  │      │
+  │      └──► Azure DNS (Virtual Network)
+  │             │
+  │             └──► Private DNS Zone: privatelink.postgres.database.azure.com
+  │                    │
+  │                    └──► Resolves to: 10.0.4.5 (private IP)
+  │
+  └──► TCP Connection (port 5432) ──► 10.0.4.5
+                                         │
+                                         └──► PostgreSQL Flexible Server
+                                              └── Delegated Subnet: 10.0.4.0/24
+```
+
+#### 13.5.2. Configuration Details
+
+**Delegated Subnet** (lines 283-315 in tts-aks-deployment.bicep):
+```bicep
+network: {
+  delegatedSubnetResourceId: vnet.properties.subnets[1].id  // 10.0.4.0/24
+  privateDnsZoneArmResourceId: privateDnsZone.id
+}
+```
+
+**What this means**:
+1. PostgreSQL server deploys into subnet 10.0.4.0/24
+2. Gets a private IP from that range (e.g., 10.0.4.4)
+3. **No public endpoint** - only accessible from VNet
+4. Private DNS zone ensures FQDN resolves to private IP
+
+**Private DNS Zone**:
+```bicep
+resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.postgres.database.azure.com'
+  location: 'global'
+}
+
+resource privateDnsZoneVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: privateDnsZone
+  name: '${vnetName}-link'
+  properties:
+    registrationEnabled: false
+    virtualNetwork: {
+      id: vnet.id
+    }
+  }
+}
+```
+
+**Effect**:
+- Any resource in VNet (10.0.0.0/16) can resolve `<server>.postgres.database.azure.com` to private IP
+- External DNS resolution returns NXDOMAIN (no public record)
+
+#### 13.5.3. TTS Pod Connection Example
+
+**Kubernetes Deployment** (planned):
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tts-server
+  namespace: tts
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: tts-server
+        image: <acr>.azurecr.io/tts-stack:latest
+        env:
+        - name: TTS_DB_URI
+          valueFrom:
+            secretKeyRef:
+              name: tts-db-connection
+              key: uri
+        # Connection string format:
+        # postgresql://ttsadmin:<password>@<server>.postgres.database.azure.com:5432/tts?sslmode=require
+```
+
+**Security Features**:
+- TLS 1.2 enforced (PostgreSQL Flexible Server default)
+- Password retrieved from Key Vault (via CSI driver or init container)
+- No database credentials in pod spec
+
+#### 13.5.4. High Availability (Zone-Redundant)
+
+```yaml
+highAvailability:
+  mode: 'ZoneRedundant'
+  standbyAvailabilityZone: '2'
+```
+
+**What this provides**:
+- **Primary**: Runs in Zone 1
+- **Standby**: Hot standby in Zone 2 (synchronous replication)
+- **Failover**: Automatic (<60 seconds) if Zone 1 fails
+- **RTO/RPO**: <2 minutes RTO, near-zero RPO
+
+**Cost**: 2x compute (primary + standby) = ~$360/month for Standard_D4s_v3
+
+### 13.6. Complete Network Flow Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         INTERNET                                    │
+└────────────┬────────────────────────────────────────┬────────────────┘
+             │                                        │
+             │ HTTPS (443)                            │ UDP (1700)
+             │                                        │ LoRaWAN
+             ▼                                        │
+┌──────────────────────────────┐                     │
+│  Azure Standard Load Balancer │                     │
+│  Public IP: <static-ip>       │                     │
+└────────────┬─────────────────┘                     │
+             │                                        │
+             ▼                                        ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      VNET: 10.0.0.0/16                              │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐  │
+│  │ AKS Subnet: 10.0.0.0/22 (1,024 IPs)                         │  │
+│  │                                                               │  │
+│  │  ┌─────────────────────┐      ┌──────────────────────┐      │  │
+│  │  │ Ingress Controller  │      │ Service: gateway-udp  │      │  │
+│  │  │ (nginx)             │      │ Type: LoadBalancer    │      │  │
+│  │  │ Pod: 10.0.2.10      │      │ Port: 1700/UDP        │      │  │
+│  │  └──────────┬──────────┘      └─────────┬────────────┘      │  │
+│  │             │                           │                    │  │
+│  │             ▼                           ▼                    │  │
+│  │  ┌──────────────────┐       ┌─────────────────────┐         │  │
+│  │  │ TTS Frontend     │       │ TTS Gateway Server  │         │  │
+│  │  │ Replicas: 2      │       │ Replicas: 3         │         │  │
+│  │  │ Pods: 10.0.2.x   │       │ Pods: 10.0.3.x      │         │  │
+│  │  └──────────┬───────┘       └─────────┬───────────┘         │  │
+│  │             │                         │                      │  │
+│  │             └─────────┬───────────────┘                      │  │
+│  │                       │                                      │  │
+│  │                       ▼                                      │  │
+│  │            ┌───────────────────────┐                         │  │
+│  │            │ Redis (Planned)       │                         │  │
+│  │            │ - Azure Cache: VNet   │                         │  │
+│  │            │ - OR StatefulSet      │                         │  │
+│  │            └───────────────────────┘                         │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐  │
+│  │ Database Subnet: 10.0.4.0/24 (Delegated)                    │  │
+│  │                                                               │  │
+│  │  ┌───────────────────────────────────────────────┐           │  │
+│  │  │ PostgreSQL Flexible Server                   │           │  │
+│  │  │ Private IP: 10.0.4.5                         │           │  │
+│  │  │ FQDN: <server>.postgres.database.azure.com   │           │  │
+│  │  │ Zone-Redundant: Primary (Zone 1)             │           │  │
+│  │  │                Standby (Zone 2)              │           │  │
+│  │  └───────────────────────────────────────────────┘           │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌──────────────────────────────┐                                  │
+│  │ Private DNS Zone             │                                  │
+│  │ privatelink.postgres.        │                                  │
+│  │   database.azure.com         │                                  │
+│  │ → Resolves to 10.0.4.5       │                                  │
+│  └──────────────────────────────┘                                  │
+└─────────────────────────────────────────────────────────────────────┘
+
+External Services:
+┌─────────────────────────┐   ┌──────────────────────┐
+│ Azure Container Registry│   │ Azure Key Vault      │
+│ Stores: TTS images      │   │ Stores: DB password, │
+│ Access: AKS managed ID  │   │         admin creds  │
+└─────────────────────────┘   └──────────────────────┘
+```
+
+### 13.7. Deployment Steps & Current State
+
+#### 13.7.1. What's Deployed (Current Bicep)
+
+✅ **Infrastructure Layer**:
+- VNet with subnets (AKS + Database)
+- NSG with security rules
+- AKS cluster (3 nodes, zone-redundant)
+- PostgreSQL Flexible Server (zone-redundant, private access)
+- Azure Container Registry
+- Key Vault with secrets
+- Monitoring (Log Analytics + App Insights)
+
+#### 13.7.2. What's Missing (Needs to be Added)
+
+❌ **Application Layer**:
+1. **Ingress Controller** (nginx or Application Gateway)
+2. **cert-manager** for TLS certificates
+3. **Redis deployment** (Azure Cache or StatefulSet)
+4. **TTS Kubernetes manifests**:
+   - Deployments (tts-server, tts-frontend, tts-gateway, etc.)
+   - Services (ClusterIP for internal, LoadBalancer for UDP gateway)
+   - ConfigMaps (TTS configuration)
+   - Secrets (from Key Vault via CSI driver)
+5. **Helm chart** for TTS application
+
+#### 13.7.3. Next Steps to Complete AKS Deployment
+
+**Phase 1: Extend Bicep Template**
+```powershell
+# Add to tts-aks-deployment.bicep:
+1. Redis subnet (10.0.6.0/24)
+2. Azure Cache for Redis resource
+3. Outputs for Redis connection string
+```
+
+**Phase 2: Deploy Ingress Controller**
+```bash
+# After AKS cluster is created
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm install nginx-ingress ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx --create-namespace \
+  --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz
+```
+
+**Phase 3: Deploy cert-manager**
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+
+# Create ClusterIssuer (see section 13.3.3)
+kubectl apply -f clusterissuer-letsencrypt.yaml
+```
+
+**Phase 4: Deploy TTS via Helm**
+```bash
+# Create Helm chart in ./charts/thethingsstack/
+helm install tts ./charts/thethingsstack \
+  --namespace tts --create-namespace \
+  --set database.host=<from-bicep-output> \
+  --set redis.host=<from-bicep-output>
+```
+
+**Phase 5: Configure DNS**
+```bash
+# Get ingress public IP
+kubectl get svc -n ingress-nginx nginx-ingress-ingress-nginx-controller
+
+# Create A record in DNS provider
+# tts.yourdomain.com → <ingress-public-ip>
+```
+
+**Phase 6: Verify**
+```bash
+# Check TLS certificate
+curl -I https://tts.yourdomain.com
+
+# Test LoRaWAN gateway connectivity
+# Configure gateway to point to <gateway-udp-service-ip>:1700
+```
+
+### 13.8. Cost Breakdown (AKS Deployment)
+
+| Component | Specification | Monthly Cost (USD) |
+|-----------|---------------|-------------------|
+| **AKS Cluster** | 3x Standard_D4s_v3 (4 vCPU, 16 GB) | ~$350 |
+| **PostgreSQL** | Standard_D4s_v3, zone-redundant | ~$360 |
+| **Azure Cache Redis** | Premium P1 (6 GB), zone-redundant | ~$200 |
+| **Load Balancer** | Standard (1 public IP) | ~$20 |
+| **Azure Container Registry** | Standard tier | ~$20 |
+| **Storage** | Premium SSD (100 GB for Redis/logs) | ~$20 |
+| **Monitoring** | Log Analytics + App Insights | ~$55 |
+| **Networking** | VNet, data transfer (moderate) | ~$50 |
+| **Key Vault** | Standard tier, <10K operations | ~$5 |
+| **TOTAL** | | **~$1,080/month** |
+
+**Cost Optimization**:
+- **Reserved Instances** (1-year): Save 40% on VMs = ~$650/month total
+- **Reduce node count**: 2 nodes (non-HA) = save $120/month
+- **Use StatefulSet Redis**: Save $200/month (adds operational burden)
+- **Downgrade PostgreSQL**: Standard_D2s_v3 = save $180/month (reduce capacity)
+
+**Optimized Production**: ~$675/month with 3-year reserved instances + careful sizing
+
+### 13.9. Monitoring & Observability
+
+**Container Insights** (enabled via AKS addon):
+- **Cluster Health**: Node CPU/memory, pod status, container restarts
+- **Workload Performance**: Per-pod resource usage, network traffic
+- **Logs**: Aggregated stdout/stderr from all containers
+
+**Application Insights**:
+- Custom TTS metrics (devices connected, packets processed)
+- Request tracking (API latency)
+- Dependency monitoring (database, Redis)
+
+**Alerting** (examples):
+```kusto
+// Pod restart loop
+let threshold = 5;
+ContainerInventory
+| where TimeGenerated > ago(30m)
+| where Name contains "tts"
+| summarize RestartCount=count() by Computer, Name
+| where RestartCount > threshold
+
+// High database connection errors
+exceptions
+| where outerMessage contains "database" or outerMessage contains "postgres"
+| summarize ErrorCount=count() by bin(timestamp, 5m)
+| where ErrorCount > 10
+```
+
+### 13.10. Security Hardening (AKS-Specific)
+
+**Network Policies** (enabled via Azure Network Policy):
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tts-db-access
+  namespace: tts
+spec:
+  podSelector:
+    matchLabels:
+      app: tts-server
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 10.0.4.0/24  # Database subnet only
+    ports:
+    - protocol: TCP
+      port: 5432
+```
+
+**Pod Security Standards**:
+```yaml
+# Enforce restricted profile
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tts
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+```
+
+**Azure Policy** (enabled via AKS addon):
+- Enforce container image sources (only ACR)
+- Block privileged containers
+- Require resource limits
+- Enforce HTTPS for ingress
+
+**Key Vault CSI Driver** (recommended for production):
+```bash
+# Install Secrets Store CSI Driver
+helm repo add csi-secrets-store https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+helm install csi-secrets-store csi-secrets-store/secrets-store-csi-driver \
+  --namespace kube-system
+
+# Install Azure provider
+kubectl apply -f https://raw.githubusercontent.com/Azure/secrets-store-csi-driver-provider-azure/master/deployment/provider-azure-installer.yaml
+```
+
+### 13.11. Migration Path: VM → AKS
+
+For organizations starting with VM deployment and scaling to AKS:
+
+**Step 1: Data Export** (from VM)
+```bash
+# SSH to VM
+ssh azureuser@<vm-ip>
+
+# Backup PostgreSQL database
+docker exec -i lorawan-stack_postgres_1 \
+  pg_dump -U ttsadmin tts > tts-backup-$(date +%F).sql
+
+# Backup Redis (if used)
+docker exec -i lorawan-stack_redis_1 redis-cli SAVE
+docker cp lorawan-stack_redis_1:/data/dump.rdb redis-backup-$(date +%F).rdb
+```
+
+**Step 2: Deploy AKS Infrastructure**
+```powershell
+.\deploy.ps1 -Mode aks -AdminEmail "<admin-email>" -Location "centralus"
+```
+
+**Step 3: Import Data to AKS**
+```bash
+# Get AKS credentials
+az aks get-credentials -g <rg-name> -n <aks-name>
+
+# Import PostgreSQL backup
+kubectl run -i --rm psql-client --image=postgres:15 --restart=Never -- \
+  psql -h <db-host> -U ttsadmin tts < tts-backup.sql
+
+# Import Redis data (if using StatefulSet)
+kubectl cp redis-backup.rdb tts/redis-0:/data/dump.rdb
+kubectl exec -n tts redis-0 -- redis-cli SHUTDOWN
+# Redis will load dump.rdb on next start
+```
+
+**Step 4: Update DNS**
+```bash
+# Point tts.yourdomain.com to new AKS ingress IP
+# (see section 13.7.3, Phase 5)
+```
+
+**Step 5: Monitor & Cutover**
+- Run both VM and AKS in parallel for 24-48 hours
+- Compare logs and metrics
+- Gradually shift traffic (DNS TTL)
+- Decommission VM after validation
+
+### 13.12. Comparison: VM vs AKS Architecture
+
+| Layer | VM Deployment | AKS Deployment |
+|-------|---------------|----------------|
+| **Ingress** | Let's Encrypt on VM (certbot cron) | Ingress Controller + cert-manager |
+| **TLS Termination** | Nginx on VM | Ingress Controller |
+| **Redis** | Docker container (ephemeral) | Azure Cache (persistent, HA) or StatefulSet |
+| **PostgreSQL Access** | Public endpoint with firewall rules | Private endpoint (VNet-integrated) |
+| **Secrets** | Azure Key Vault → VM Extension → env vars | Key Vault → CSI Driver → mounted secrets |
+| **Scaling** | Vertical (resize VM) | Horizontal (add pods/nodes) |
+| **High Availability** | Single VM (no HA) | Multi-zone nodes + replicas |
+| **Monitoring** | Log Analytics (single VM) | Container Insights (all pods) |
+| **Cost** | ~$205/month | ~$675/month (optimized) |
+| **Complexity** | Low (Docker Compose) | High (Kubernetes manifests) |
+| **Ideal Use Case** | Dev/test, <10K devices | Production, >100K devices |
+
+---
+
 ## Document Changelog
 
 | Version | Date | Author | Changes |
@@ -2519,6 +3425,13 @@ docker compose exec stack ttn-lw-stack is-db migrate
 | | | | - 10+ Mermaid diagrams for visualization |
 | | | | - 50+ code examples and command references |
 | | | | - Production readiness guidance |
+| 1.1 | 2024-01-16 | System | Added Section 13: AKS Production Architecture |
+| | | | - Detailed ingress architecture (nginx, AGIC, cert-manager) |
+| | | | - Redis deployment options (Azure Cache vs StatefulSet) |
+| | | | - PostgreSQL private access implementation |
+| | | | - Complete network flow diagrams |
+| | | | - Migration path VM → AKS |
+| | | | - Security hardening for Kubernetes |
 
 ---
 
