@@ -1985,7 +1985,7 @@ docker compose exec stack ttn-lw-stack is-db create-admin-user \
 
 ## 7. Data Flows & Integration
 
-### 6.1 LoRaWAN Data Flow (Uplink)
+### 7.1 LoRaWAN Data Flow (Uplink)
 
 ```mermaid
 sequenceDiagram
@@ -2102,7 +2102,7 @@ sequenceDiagram
 
 ---
 
-### 6.4 Integration Patterns
+### 7.4 Integration Patterns
 
 #### HTTP Webhooks
 
@@ -2166,7 +2166,7 @@ grpcurl \
 
 ---
 
-### 6.5 Database Transaction Flows
+### 7.5 Database Transaction Flows
 
 #### Device Uplink Storage
 
@@ -2200,7 +2200,7 @@ INSERT INTO uplink_messages (
 
 ---
 
-### 6.6 Certificate Distribution Flow
+### 7.6 Certificate Distribution Flow
 
 ```mermaid
 graph TD
@@ -2406,7 +2406,7 @@ sed -i "s|{{DB_PASSWORD}}|$DB_PASSWORD|g" /home/admin/config/tts.yml
 
 ---
 
-### 7.5 Data Encryption
+### 8.5 Data Encryption
 
 #### Encryption at Rest
 
@@ -2494,7 +2494,7 @@ is:
 
 ## 9. Operations & Maintenance
 
-### 8.1 Common Operational Tasks
+### 9.1 Common Operational Tasks
 
 | Task | Command | Description |
 |------|---------|-------------|
@@ -2669,7 +2669,7 @@ ContainerLog
 
 ---
 
-### 8.5 Scaling Strategies
+### 9.5 Scaling Strategies
 
 #### Vertical Scaling (Increase VM Size)
 
@@ -2714,7 +2714,7 @@ az vm start \
 
 ---
 
-### 8.6 Disaster Recovery
+### 9.6 Disaster Recovery
 
 #### RTO and RPO Targets
 
@@ -2791,7 +2791,7 @@ docker compose exec stack ttn-lw-stack is-db info
 
 ---
 
-### 8.7 Troubleshooting Guide
+### 9.7 Troubleshooting Guide
 
 | Symptom | Likely Cause | Diagnostic Steps | Resolution |
 |---------|--------------|------------------|------------|
@@ -2807,7 +2807,7 @@ docker compose exec stack ttn-lw-stack is-db info
 
 ## 10. Scaling & Performance
 
-### 9.1 Performance Benchmarks
+### 10.1 Performance Benchmarks
 
 **Baseline Performance** (Standard_B4ms VM):
 
@@ -2876,7 +2876,7 @@ is:
 
 ## 11. Cost Optimization
 
-### 10.1 Cost Breakdown (Monthly, East US Region)
+### 11.1 Cost Breakdown (Monthly, East US Region)
 
 | Resource | SKU/Tier | Monthly Cost | Annual Cost |
 |----------|----------|--------------|-------------|
@@ -2953,7 +2953,7 @@ az postgres flexible-server update \
 
 ## 12. Future Enhancements
 
-### 11.1 High Availability Architecture
+### 12.1 High Availability Architecture
 
 ### 12.1 High Availability Architecture
 
@@ -3117,7 +3117,7 @@ az keyvault update \
 
 ---
 
-### 11.4 CI/CD Pipeline
+### 12.4 CI/CD Pipeline
 
 **GitHub Actions Workflow** (`.github/workflows/deploy.yml`):
 
