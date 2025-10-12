@@ -13,7 +13,7 @@ This is a **production-ready deployment system** for The Things Stack (LoRaWAN N
 ```
 deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
 │
-├── Mode: quick ──► deploy-simple.ps1 ──► deployments/vm/tts-docker-deployment.bicep
+├── Mode: quick ──► deployments/vm/deploy-simple.ps1 ──► deployments/vm/tts-docker-deployment.bicep
 ├── Mode: aks ────► deployments/kubernetes/deploy-aks.ps1 ──► deployments/kubernetes/tts-aks-deployment.bicep
 └── Mode: vm ─────► Inline advanced deployment ──► deployments/vm/tts-docker-deployment.bicep
 ```
@@ -35,12 +35,12 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
    printf 'password\npassword\n' | create-admin-user
    ```
 
-2. **SSH IP Restriction** (`deploy-simple.ps1:82-100`):
+2. **SSH IP Restriction** (`deployments/vm/deploy-simple.ps1:82-100`):
    - Auto-detect deployer IP via `ipify.org` API
    - NSG rule uses detected IP, **never** `*` for production
    - `adminSourceIP` parameter passed to Bicep
 
-3. **Key Vault RBAC** (`deploy-simple.ps1:128-160`):
+3. **Key Vault RBAC** (`deployments/vm/deploy-simple.ps1:128-160`):
    - Wait 30 seconds after role assignment for propagation
    - Use `Key Vault Secrets Officer` role for deployment user
    - All 8 secrets required: db-password, tts-admin-password, tts-admin-username, cookie-hash-key, cookie-block-key, oauth-client-secret, admin-email, checksum
@@ -83,6 +83,7 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
 - 6-step orchestration: Collect params → Create RG → Create KV → Add secrets → Confirm → Deploy
 - Auto-detects IP, creates Key Vault, stores 8 secrets, then deploys Bicep
 - Default template path: `.\deployments\vm\tts-docker-deployment.bicep`
+- **Location**: `deployments/vm/deploy-simple.ps1`
 
 **Error Handling**:
 ```powershell
@@ -180,7 +181,7 @@ az deployment group show -g <rg-name> -n <deployment-name>
 
 **Must Read Before Changes**:
 - `deployments/vm/tts-docker-deployment.bicep` - Core infrastructure (852 lines, includes all 7 fixes)
-- `deploy-simple.ps1` - Standard orchestration (316 lines, Key Vault + secrets)
+- `deployments/vm/deploy-simple.ps1` - Standard orchestration (316 lines, Key Vault + secrets)
 - `deploy.ps1` - Primary entry point (menu system)
 
 **Reference for Patterns**:
@@ -192,7 +193,7 @@ az deployment group show -g <rg-name> -n <deployment-name>
 ### Adding a New Deployment Parameter
 
 1. Add to Bicep template parameters (top of file)
-2. Add to `deploy-simple.ps1` script parameters
+2. Add to `deployments/vm/deploy-simple.ps1` script parameters
 3. Pass through in `$deploymentParams` hashtable (line 233)
 4. Update `README.md` deployment options section
 5. Update `docs/DEPLOYMENT_ORCHESTRATION.md` if affecting modes

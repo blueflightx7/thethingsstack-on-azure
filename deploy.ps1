@@ -13,7 +13,7 @@ param(
     [string]$Location = "centralus",
     
     [Parameter(Mandatory=$false)]
-    [string]$EnvironmentName = "tts-prod",
+    [string]$EnvironmentName = "ttsprod",
     
     [Parameter(Mandatory=$false)]
     [string]$AdminEmail,
@@ -187,7 +187,7 @@ Write-Host "━━━━━━━━━━━━━━━━━━━━━━�
 switch ($Mode.ToLower()) {
     "quick" {
         Write-Host "📦 Starting Quick VM Deployment..." -ForegroundColor Cyan
-        Write-Host "   Using: deploy-simple.ps1`n" -ForegroundColor Gray
+        Write-Host "   Using: deployments/vm/deploy-simple.ps1`n" -ForegroundColor Gray
         
         $params = @{
             Location = $Location
@@ -197,7 +197,7 @@ switch ($Mode.ToLower()) {
         if ($AdminEmail) { $params.AdminEmail = $AdminEmail }
         if ($ParametersFile) { $params.ParametersFile = $ParametersFile }
         
-        & "$PSScriptRoot\deploy-simple.ps1" @params
+        & "$PSScriptRoot\deployments\vm\deploy-simple.ps1" @params
     }
     
     "aks" {

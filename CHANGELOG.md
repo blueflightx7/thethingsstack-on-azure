@@ -380,7 +380,7 @@ If you have deployments from version 1.0.0:
 
 2. **Deploy new version**:
    ```powershell
-   .\deploy-simple.ps1 -AdminEmail "your-email@example.com"
+   .\deployments\vm\deploy-simple.ps1 -AdminEmail "your-email@example.com"
    ```
 
 3. **Restore data** (if needed):
