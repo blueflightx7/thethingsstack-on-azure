@@ -69,10 +69,9 @@ This repository provides **Infrastructure as Code (IaC)** for deploying [The Thi
 - ✅ Azure CLI ([Install](https://docs.microsoft.com/cli/azure/install-azure-cli)) or PowerShell with Az module
 - ✅ Domain name or use auto-generated Azure DNS name
 
-**Optional** (for development):
-- Bicep CLI ([Install](https://docs.microsoft.com/azure/azure-resource-manager/bicep/install))
-- Git for version control
-- VS Code with Azure extensions
+**For AKS/Kubernetes Deployment** (production scale):
+- ✅ kubectl ([Install](https://kubernetes.io/docs/tasks/tools/))
+- ✅ Helm 3 ([Install](https://helm.sh/docs/intro/install/))
 
 **Optional** (for development):
 - Bicep CLI ([Install](https://docs.microsoft.com/azure/azure-resource-manager/bicep/install))
@@ -81,9 +80,10 @@ This repository provides **Infrastructure as Code (IaC)** for deploying [The Thi
 
 ---
 
-### Option 1: Simple Deployment (Recommended)
+### Primary Deployment Method (Recommended)
 
-**PowerShell** (Windows):
+**Interactive Menu-Driven Deployment** - Choose your deployment mode:
+
 ```powershell
 # Clone repository
 git clone https://github.com/blueflightx7/thethingsstack-on-azure.git
@@ -92,7 +92,50 @@ cd thethingsstack-on-azure
 # Login to Azure
 az login
 
-# Deploy with auto-detected SSH IP restriction
+# Run primary deployment orchestrator
+.\deploy.ps1
+```
+
+You will see an interactive menu:
+
+```
+╔══════════════════════════════════════════════════════════════════╗
+║   SELECT DEPLOYMENT MODE                                         ║
+╚══════════════════════════════════════════════════════════════════╝
+
+[1] Quick Deployment (VM)
+    • Single VM with Docker Compose
+    • Best for: Development, Testing, PoC
+    • Cost: ~$155-205/month
+    • Capacity: Up to 10,000 devices
+
+[2] Production Deployment (AKS - Kubernetes)  ← PRODUCTION SCALE
+    • Azure Kubernetes Service cluster
+    • Best for: Production, High Availability
+    • Cost: ~$500-800/month
+    • Capacity: 100,000+ devices, auto-scaling
+
+[3] Advanced VM Deployment (Custom)
+    • VM with custom configuration
+    • Best for: Custom requirements, specific sizing
+
+[4] Compare All Deployment Options
+```
+
+**Choose option [2] for production-scale Kubernetes deployment.**
+
+---
+
+### Alternative: Direct Deployment Methods
+
+#### Option 1: Quick VM Deployment (Development/Testing)
+
+**PowerShell** (Windows):
+```powershell
+# Deploy directly with VM mode
+.\deploy.ps1 -Mode quick -AdminEmail "your-email@example.com"
+
+# Or use the simple deployment script
 .\deploy-simple.ps1 -AdminEmail "your-email@example.com"
 ```
 
@@ -110,13 +153,32 @@ chmod +x deploy.sh
 ./deploy.sh centralus tts-prod your-email@example.com
 ```
 
-**Deployment Time**: 6-12 minutes (including Let's Encrypt certificate provisioning)
+**Deployment Time**: 10-15 minutes (including Let's Encrypt certificate provisioning)
+
+#### Option 3: Production AKS Deployment (Direct)
+
+**PowerShell**:
+```powershell
+# Deploy directly to AKS/Kubernetes (production scale)
+.\deploy.ps1 -Mode aks -AdminEmail "your-email@example.com" -Location "centralus"
+
+# Or use the AKS deployment script directly
+.\deployments\kubernetes\deploy-aks.ps1 -AdminEmail "your-email@example.com"
+```
+
+**Requirements**:
+- kubectl installed and configured
+- Helm 3 installed
+- Monthly budget: ~$500-800
+- Use case: Production with 100K+ devices, high availability, auto-scaling
+
+**Deployment Time**: 20-30 minutes (cluster provisioning + application deployment)
 
 ---
 
-### Option 2: Custom Parameters
+### Advanced: Custom Parameters
 
-Create `parameters.json`:
+Create `parameters.json` for repeatable deployments:
 ```json
 {
   "adminUsername": "azureuser",
@@ -134,7 +196,11 @@ Create `parameters.json`:
 
 Deploy:
 ```powershell
+# VM deployment with parameters file
 .\deploy-simple.ps1 -ParametersFile "parameters.json"
+
+# AKS deployment with parameters file
+.\deployments\kubernetes\deploy-aks.ps1 -ParametersFile "parameters.json"
 ```
 
 ---
@@ -234,37 +300,84 @@ After deployment completes (~10 minutes):
 
 ## 🔧 Deployment Options
 
-### Deployment Scripts
+### Primary Deployment Methods
 
-| Script | Platform | Use Case |
-|--------|----------|----------|
-| **`deploy-simple.ps1`** | PowerShell | ✅ **Recommended** - Auto-detects deployer IP, creates Key Vault |
-| **`deploy.ps1`** | PowerShell | Advanced - More parameter control |
-| **`deploy.sh`** | Bash | Linux/macOS deployments |
-| **Bicep Direct** | Azure CLI | CI/CD pipelines, custom automation |
+| Method | Description | Best For | Monthly Cost |
+|--------|-------------|----------|--------------|
+| **Interactive Menu** | `.\deploy.ps1` (no parameters) | First-time users, flexibility | Varies |
+| **Quick VM** | `.\deploy.ps1 -Mode quick` or `.\deploy-simple.ps1` | Development, testing, PoC | ~$155-205 |
+| **Production AKS** | `.\deploy.ps1 -Mode aks` | Production scale, HA, 100K+ devices | ~$500-800 |
+| **Advanced VM** | `.\deploy.ps1 -Mode vm` | Custom configuration, specific sizing | ~$200-400 |
+
+### Deployment Scripts Reference
+
+| Script | Platform | Description |
+|--------|----------|-------------|
+| **`deploy.ps1`** | PowerShell | 🌟 **PRIMARY** - Menu-driven orchestrator for all deployment modes |
+| **`deploy-simple.ps1`** | PowerShell | Quick VM deployment (called by deploy.ps1 -Mode quick) |
+| **`deployments/kubernetes/deploy-aks.ps1`** | PowerShell | AKS production deployment (called by deploy.ps1 -Mode aks) |
+| **`deploy.sh`** | Bash | Linux/macOS VM deployments |
+
+### When to Use Each Mode
+
+#### Quick VM (`-Mode quick`)
+- **Device Count**: Up to 10,000 devices
+- **Availability**: Single instance (no HA)
+- **Use Cases**: Development, testing, proof-of-concept, small deployments
+- **Deployment Time**: 10-15 minutes
+- **Cost**: ~$155-205/month
+
+#### Production AKS (`-Mode aks`) ⭐ **RECOMMENDED FOR PRODUCTION**
+- **Device Count**: 100,000+ devices with auto-scaling
+- **Availability**: High availability with zone-redundant nodes
+- **Features**: Auto-scaling, load balancing, rolling updates, self-healing
+- **Use Cases**: Production deployments, enterprise scale, mission-critical
+- **Deployment Time**: 20-30 minutes
+- **Cost**: ~$500-800/month
+- **Scaling**: Horizontal (add nodes) and vertical (change node size)
+
+#### Advanced VM (`-Mode vm`)
+- **Device Count**: Up to 50,000 devices (depending on VM size)
+- **Availability**: Single instance (can configure backups)
+- **Use Cases**: Custom requirements, specific security needs, hybrid scenarios
+- **Deployment Time**: 15-20 minutes
+- **Cost**: Varies (~$200-400/month)
 
 ### Configuration Methods
 
-#### Method 1: Command-Line Parameters (Quick)
+#### Method 1: Interactive Menu (Recommended)
 
 ```powershell
-.\deploy-simple.ps1 `
-    -AdminEmail "admin@example.com" `
-    -Location "eastus" `
-    -VMSize "Standard_D4s_v3"
+.\deploy.ps1  # Shows menu, select your mode
 ```
 
-#### Method 2: Parameters File (Repeatable)
-
-1. Copy `parameters.template.json` → `parameters.json`
-2. Edit values
-3. Deploy: `.\deploy-simple.ps1 -ParametersFile "parameters.json"`
-
-#### Method 3: Azure Portal (Interactive)
+#### Method 2: Direct Mode Selection
 
 ```powershell
-# Generate ARM template
+# Quick VM
+.\deploy.ps1 -Mode quick -AdminEmail "admin@example.com"
+
+# Production AKS
+.\deploy.ps1 -Mode aks -AdminEmail "admin@example.com" -Location "centralus"
+
+# Advanced VM
+.\deploy.ps1 -Mode vm -AdminEmail "admin@example.com"
+```
+
+#### Method 3: Parameters File (Repeatable Deployments)
+
+1. Copy `parameters.template.json` → `parameters.json`
+2. Edit values for your deployment mode
+3. Deploy: `.\deploy.ps1 -Mode [quick|aks|vm] -ParametersFile "parameters.json"`
+
+#### Method 4: Azure Portal (Manual)
+
+```powershell
+# Generate ARM template for VM deployment
 bicep build deployments/vm/tts-docker-deployment.bicep
+
+# Generate ARM template for AKS deployment
+bicep build deployments/kubernetes/tts-aks-deployment.bicep
 
 # Upload to Azure Portal → Deploy custom template
 ```
@@ -273,7 +386,7 @@ bicep build deployments/vm/tts-docker-deployment.bicep
 
 ## 📦 What Gets Deployed
 
-### Azure Resources (10 Total)
+### VM Deployment Resources (Quick/Advanced Modes)
 
 | Resource | Type | Purpose | Monthly Cost |
 |----------|------|---------|--------------|
@@ -291,11 +404,38 @@ bicep build deployments/vm/tts-docker-deployment.bicep
 
 **💰 See**: [Cost Optimization](#-cost-estimation) for savings strategies (Reserved Instances save ~40%)
 
+### AKS Deployment Resources (Production Mode)
+
+| Resource | Type | Purpose | Monthly Cost |
+|----------|------|---------|--------------|
+| **AKS Cluster** | 3x Standard_D4s_v3 nodes | Kubernetes cluster | ~$350 |
+| **PostgreSQL** | Flexible Server GP 4vCore | Database (HA) | ~$180 |
+| **DB Storage** | 128GB with auto-grow | Data persistence | ~$20 |
+| **Container Registry** | Standard ACR | Container images | ~$20 |
+| **Key Vault** | Standard tier | Secrets management | ~$1 |
+| **Load Balancer** | Standard | Traffic distribution | ~$25 |
+| **Public IP** | Static | Internet access | ~$4 |
+| **Virtual Network** | VNet + 2 subnets | Network isolation | Free |
+| **Persistent Volumes** | Azure Disks | Stateful storage | ~$20 |
+| **Bandwidth** | ~200GB outbound/month | Data transfer | ~$20 |
+| **Monitoring** | Log Analytics + App Insights | Observability | ~$35 |
+| **Total** | - | - | **~$675/month** |
+
+**Features Included**:
+- ✅ High availability (zone-redundant)
+- ✅ Auto-scaling (2-10 nodes)
+- ✅ Rolling updates (zero downtime)
+- ✅ PostgreSQL geo-replication
+- ✅ Advanced monitoring (Prometheus metrics)
+- ✅ Horizontal pod autoscaling
+
+**Device Capacity**: 100,000+ devices with auto-scaling
+
 ---
 
 ### The Things Stack Components
 
-#### Core Subsystems (Monolithic Container)
+#### Core Subsystems (Monolithic Container - VM Mode)
 
 ```yaml
 services:
