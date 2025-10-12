@@ -2835,148 +2835,249 @@ spec:
 - UDP requires Layer 4 load balancing (Azure Standard LB)
 - Gateway traffic bypasses Ingress → goes directly to gateway-server pods
 
-### 13.4. Redis Architecture (Planned)
+### 13.4. Redis Architecture (Azure Cache for Redis Enterprise)
 
-**CURRENT STATE**: No Redis deployment in current Bicep template. Two options are available:
+**RECOMMENDED APPROACH**: Azure Cache for Redis **Enterprise E10** tier for production AKS deployments.
 
-#### 13.4.1. Option A: Azure Cache for Redis (Managed Service - Recommended)
+#### 13.4.1. Why Enterprise Tier?
 
-**Configuration**:
-```yaml
-SKU: Premium P1 (6 GB cache)
-Version: Redis 6.x
-Features:
-  - VNet Injection (into 10.0.6.0/24 subnet)
-  - Zone redundancy
-  - Data persistence (RDB/AOF)
-  - 99.95% SLA
-Cost: ~$200/month
+**Critical Discovery**: Azure Cache for Redis has TWO distinct product lines:
+
+| Tier | Redis Version | Clustering Support | TTS Compatibility |
+|------|---------------|-------------------|-------------------|
+| **Basic/Standard/Premium** | 6.0 only (no upgrades) | OSS Clustering | ❌ Limited (TTS requires 6.2+) |
+| **Enterprise/Enterprise Flash** | 7.2 (auto-upgrades) | OSS, Enterprise, **Non-Clustered** | ✅ **Fully Compatible** |
+
+**TTS Requirements**:
+- Redis 6.2+ (for TTS 3.30.2 compatibility)
+- Non-clustered mode (TTS doesn't support Redis Cluster protocol)
+- Cache size: ~10-15 GB for 100K devices
+
+**Enterprise E10 Meets Requirements**:
+- ✅ Redis 7.2 (exceeds 6.2+ requirement)
+- ✅ Non-Clustered policy available (for caches ≤25 GB)
+- ✅ 12 GB cache capacity
+- ✅ VNet injection (private access)
+- ✅ 99.99% SLA with zone redundancy
+
+#### 13.4.2. Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  AKS Cluster (10.0.0.0/22)                                      │
+│                                                                 │
+│  ┌──────────────────┐        ┌──────────────────┐             │
+│  │ TTS Pod (Zone 1) │        │ TTS Pod (Zone 2) │             │
+│  │ 10.0.2.45        │        │ 10.0.2.88        │             │
+│  └────────┬─────────┘        └────────┬─────────┘             │
+│           │                           │                        │
+│           │ TTN_LW_REDIS_ADDRESS      │                        │
+│           │ + TLS connection          │                        │
+│           │                           │                        │
+│           └───────────┬───────────────┘                        │
+│                       │                                        │
+└───────────────────────┼────────────────────────────────────────┘
+                        │
+                        ▼
+        ┌───────────────────────────────────┐
+        │  Azure Private Link               │
+        │  (privatelink.redisenterprise...) │
+        └───────────────┬───────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Azure Cache for Redis Enterprise (VNet-Injected)              │
+│                                                                 │
+│  Cluster: tts-redis-ent                                        │
+│  Database: default (non-clustered policy)                      │
+│                                                                 │
+│  ┌────────────────┐              ┌────────────────┐           │
+│  │  Primary Node  │◄────sync────►│ Replica Node   │           │
+│  │  Zone 1        │              │ Zone 2         │           │
+│  │  10.0.6.4:10000│              │ 10.0.6.5:10000 │           │
+│  └────────────────┘              └────────────────┘           │
+│                                                                 │
+│  Endpoint: tts-redis.centralus.redisenterprise.cache.azure.net │
+│  Port: 10000 (TLS-encrypted)                                   │
+│  Persistence: AOF (every second) + RDB (hourly snapshots)      │
+│  Subnet: 10.0.6.0/24 (delegated)                               │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**Bicep Addition Required**:
+#### 13.4.3. Configuration Details
+
+**Enterprise Cluster Configuration**:
+```yaml
+SKU: Enterprise_E10
+Capacity: 2 nodes (primary + replica for HA)
+Cache Size: 12 GB per node
+Redis Version: 7.2 (auto-upgrades to latest minor version)
+TLS Version: 1.2 minimum
+Zone Redundancy: Enabled (nodes in different zones)
+Clustering Policy: Non-Clustered (single logical database)
+Eviction Policy: allkeys-lru (least recently used)
+Persistence:
+  - AOF (Append-Only File): Every 1 second
+  - RDB Snapshot: Every hour
+Network: VNet injection into 10.0.6.0/24
+Public Access: Disabled
+Cost: ~$175/month
+```
+
+**Required Bicep Infrastructure** (add to tts-aks-deployment.bicep):
 ```bicep
-resource redisCache 'Microsoft.Cache/redis@2023-08-01' = {
-  name: redisCacheName
+// Redis Enterprise subnet (add to VNet subnets)
+{
+  name: 'RedisSubnet'
+  properties: {
+    addressPrefix: '10.0.6.0/24'
+    delegations: [
+      {
+        name: 'Microsoft.Cache.redis'
+        properties: {
+          serviceName: 'Microsoft.Cache/redisEnterprise'
+        }
+      }
+    ]
+  }
+}
+
+// Redis Enterprise Cluster
+resource redisEnterpriseCluster 'Microsoft.Cache/redisEnterprise@2024-02-01' = {
+  name: redisEnterpriseName
+  location: location
+  sku: {
+    name: 'Enterprise_E10'
+    capacity: 2  // 2 nodes for HA
+  }
+  properties: {
+    minimumTlsVersion: '1.2'
+  }
+  zones: ['1', '2']  // Zone-redundant deployment
+}
+
+// Redis Database with non-clustered policy
+resource redisEnterpriseDatabase 'Microsoft.Cache/redisEnterprise/databases@2024-02-01' = {
+  parent: redisEnterpriseCluster
+  name: 'default'
+  properties: {
+    clientProtocol: 'Encrypted'  // TLS required
+    clusteringPolicy: 'EnterpriseCluster'  // Non-clustered mode
+    evictionPolicy: 'AllKeysLRU'
+    persistence: {
+      aofEnabled: true
+      aofFrequency: '1s'
+      rdbEnabled: true
+      rdbFrequency: '1h'
+    }
+    port: 10000
+  }
+}
+
+// Private endpoint for secure access
+resource redisPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-05-01' = {
+  name: '${redisEnterpriseName}-pe'
   location: location
   properties: {
-    sku: {
-      name: 'Premium'
-      family: 'P'
-      capacity: 1
+    subnet: {
+      id: vnet.properties.subnets[0].id  // AKS subnet
     }
-    enableNonSslPort: false
-    minimumTlsVersion: '1.2'
-    redisVersion: '6'
-    subnetId: vnet.properties.subnets[2].id  // New Redis subnet
-    publicNetworkAccess: 'Disabled'
+    privateLinkServiceConnections: [
+      {
+        name: 'redis-connection'
+        properties: {
+          privateLinkServiceId: redisEnterpriseCluster.id
+          groupIds: ['redisEnterprise']
+        }
+      }
+    ]
+  }
+}
+
+// Store connection details in Key Vault
+resource redisHostSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'redis-host'
+  properties: {
+    value: '${redisEnterpriseCluster.properties.hostName}:10000'
+  }
+}
+
+resource redisPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'redis-password'
+  properties: {
+    value: redisEnterpriseDatabase.listKeys().primaryKey
   }
 }
 ```
 
-**Access from AKS**:
+#### 13.4.4. TTS Pod Connection Configuration
+
+**Environment Variables** (from Helm values):
 ```yaml
-# TTS pod connects via private endpoint
-redis:
-  host: <cache-name>.redis.cache.windows.net
-  port: 6380
-  tls: true
-  password: <from-key-vault>
+env:
+  - name: TTN_LW_REDIS_ADDRESS
+    valueFrom:
+      secretKeyRef:
+        name: tts-secrets
+        key: redis-host  # From Key Vault: tts-redis.centralus.redisenterprise.cache.azure.net:10000
+  - name: TTN_LW_REDIS_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: tts-secrets
+        key: redis-password  # Primary access key
+  - name: TTN_LW_REDIS_TLS
+    value: "true"  # Enterprise tier enforces TLS
 ```
 
-**Advantages**:
-- Fully managed (no maintenance)
-- High availability (zone-redundant)
-- Automatic backups
-- Scaling without pod restarts
+**Connection Flow**:
+1. TTS pod reads `redis-host` and `redis-password` from Key Vault (via CSI driver or env vars)
+2. Initiates TLS connection to `tts-redis.centralus.redisenterprise.cache.azure.net:10000`
+3. DNS resolves to private endpoint IP (10.0.2.x) within AKS subnet
+4. Traffic stays within VNet (never traverses public internet)
+5. Redis Enterprise authenticates using provided password
+6. All data in transit encrypted via TLS 1.2
 
-**Disadvantages**:
-- Additional cost (~$200/month)
-- Requires VNet subnet for injection
+#### 13.4.5. Alternative Option: Redis StatefulSet (Lower Cost)
 
-#### 13.4.2. Option B: Redis StatefulSet in AKS (Self-Managed)
+For **cost-sensitive scenarios** or **dev/test environments**, you can deploy Redis as a StatefulSet within the AKS cluster. See [AKS_MODERNIZATION_PLAN.md](AKS_MODERNIZATION_PLAN.md) for detailed StatefulSet configuration.
 
-**Kubernetes Deployment**:
-```yaml
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: redis
-  namespace: tts
-spec:
-  serviceName: redis
-  replicas: 3  # Master + 2 replicas
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-      - name: redis
-        image: redis:7-alpine
-        ports:
-        - containerPort: 6379
-        volumeMounts:
-        - name: redis-data
-          mountPath: /data
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-  volumeClaimTemplates:
-  - metadata:
-      name: redis-data
-    spec:
-      accessModes: ["ReadWriteOnce"]
-      storageClassName: managed-csi-premium  # Azure Premium SSD
-      resources:
-        requests:
-          storage: 10Gi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  namespace: tts
-spec:
-  clusterIP: None  # Headless service
-  selector:
-    app: redis
-  ports:
-  - port: 6379
-```
+**Trade-offs**:
 
-**Access from TTS**:
-```yaml
-# Connection string
-redis:
-  host: redis-0.redis.tts.svc.cluster.local
-  port: 6379
-  tls: false  # Internal cluster traffic
-```
+| Aspect | Azure Cache Enterprise E10 | Redis StatefulSet |
+|--------|----------------------------|-------------------|
+| **Cost** | ~$175/month | ~$12/month (storage only) |
+| **Operations** | Zero (fully managed) | High (manual upgrades, backups) |
+| **High Availability** | 99.99% SLA, auto-failover | Manual (requires Redis Sentinel) |
+| **Scaling** | Upgrade SKU tier | Requires pod restart + data migration |
+| **Persistence** | Automated AOF + RDB | Manual configuration |
+| **Security** | Enterprise-grade with compliance | Self-managed |
+| **Monitoring** | Built-in Azure Monitor metrics | Manual Prometheus setup |
 
-**Advantages**:
-- Lower cost (only storage + compute already in cluster)
-- Full control over configuration
-- No VNet subnet required
+**Recommendation**: Use **Enterprise E10** for production. The additional $163/month is justified by:
+- Elimination of operational burden (no Redis expertise required)
+- Automatic failover (<30 seconds downtime)
+- Compliance-ready (SOC 2, HIPAA, PCI DSS certifications)
+- 24/7 Microsoft support
 
-**Disadvantages**:
-- Manual maintenance (upgrades, backups)
-- Requires StatefulSet expertise
-- No built-in zone redundancy (need Redis Sentinel for HA)
+#### 13.4.6. Performance Characteristics
 
-#### 13.4.3. Recommended Approach
+**Enterprise E10 Benchmarks** (per Microsoft docs):
+- **Throughput**: 50,000+ ops/sec (GET/SET operations)
+- **Latency**: <1ms (p50), <3ms (p99) within same region
+- **Connections**: 10,000 concurrent client connections
+- **Network**: 1 Gbps baseline, 2.5 Gbps burst
 
-**For Production**: Use **Azure Cache for Redis Premium** with VNet injection
-- Justification: The cost difference (~$200/month) is worth the operational simplicity, HA guarantees, and reduced operational burden for production deployments supporting 100K+ devices.
+**TTS Usage Patterns**:
+- Device session caching (read-heavy)
+- Event stream processing (pub/sub)
+- Rate limiting counters (write-heavy during uplinks)
+- Inter-component messaging (moderate throughput)
 
-**For Dev/Test AKS**: Use **StatefulSet** if cost is a concern
-- Justification: Acceptable risk for non-production environments.
+**E10 Capacity**: Sufficient for **100,000+ active devices** with typical LoRaWAN traffic (1 uplink/5 min avg).
+
+
 
 ### 13.5. PostgreSQL Private Access Architecture
 
