@@ -1,0 +1,274 @@
+# The Things Stack on Azure - AI Agent Instructions
+
+## Project Overview
+
+This is a **production-ready deployment system** for The Things Stack (LoRaWAN Network Server) on Azure. The codebase provides Infrastructure-as-Code (Bicep) with PowerShell orchestration, supporting three deployment modes: Quick VM (dev/test), Production AKS (Kubernetes), and Advanced VM (custom).
+
+**Critical Context**: This project has undergone catastrophic recovery (2,738+ lines rebuilt) and includes 7 critical bug fixes that are documented and must be preserved.
+
+## Architecture & Entry Points
+
+### Deployment Hierarchy (ALWAYS use this)
+
+```
+deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
+│
+├── Mode: quick ──► deploy-simple.ps1 ──► deployments/vm/tts-docker-deployment.bicep
+├── Mode: aks ────► deployments/kubernetes/deploy-aks.ps1 ──► deployments/kubernetes/tts-aks-deployment.bicep
+└── Mode: vm ─────► Inline advanced deployment ──► deployments/vm/tts-docker-deployment.bicep
+```
+
+**Never suggest using scripts directly** - always route through `deploy.ps1` with `-Mode` parameter.
+
+## Critical Patterns & Conventions
+
+### 1. The 7 Critical Fixes (NEVER REGRESS)
+
+**All fixes documented in**: `DEPLOYMENT_FIXES_SUMMARY.md`, `SECURITY_FIX_SUMMARY.md`, `LOGIN_FIX.md`
+
+1. **Admin User Creation** (`deployments/vm/tts-docker-deployment.bicep:782`):
+   ```bash
+   # CORRECT (FIX #7):
+   create-admin-user --password 'password'
+   
+   # WRONG (causes login failure):
+   printf 'password\npassword\n' | create-admin-user
+   ```
+
+2. **SSH IP Restriction** (`deploy-simple.ps1:82-100`):
+   - Auto-detect deployer IP via `ipify.org` API
+   - NSG rule uses detected IP, **never** `*` for production
+   - `adminSourceIP` parameter passed to Bicep
+
+3. **Key Vault RBAC** (`deploy-simple.ps1:128-160`):
+   - Wait 30 seconds after role assignment for propagation
+   - Use `Key Vault Secrets Officer` role for deployment user
+   - All 8 secrets required: db-password, tts-admin-password, tts-admin-username, cookie-hash-key, cookie-block-key, oauth-client-secret, admin-email, checksum
+
+4. **Cookie Keys** (64 hex characters each):
+   ```powershell
+   $cookieHashKey = -join ((0..63) | ForEach-Object { '{0:X}' -f (Get-Random -Maximum 16) })
+   ```
+
+5. **OAuth Client Secret**: Always use `"console"` as the value
+
+6. **Container Readiness**: Wait for `{{.State.Health.Status}}` before admin user creation
+
+7. **Database Credentials**: Alphanumeric only (no special chars in PostgreSQL password)
+
+### 2. Bicep Template Structure
+
+**Primary Template**: `deployments/vm/tts-docker-deployment.bicep` (852 lines)
+
+**Key Sections**:
+- Lines 1-50: Parameter definitions with security decorators (@secure, @minValue, etc.)
+- Lines 103-165: NSG rules (SSH restricted, LoRaWAN UDP 1700, HTTPS, gRPC ports)
+- Lines 406-450: Key Vault secrets (if enabled)
+- Lines 530-700: cloud-init script embedded in `customData` (YAML-safe, no heredocs)
+- Lines 782: Admin user creation with `--password` flag (FIX #7)
+
+**When modifying cloud-init**:
+- Use cron for scheduled tasks, **never** heredocs (breaks YAML parser)
+- Reference: `docs/archive/CLOUD-INIT-FIX.md` for historical context
+
+### 3. PowerShell Orchestration Patterns
+
+**deploy.ps1** (PRIMARY):
+- Interactive menu if no `-Mode` specified
+- Three modes: `quick`, `aks`, `vm`
+- Always validates email format before proceeding
+- Uses color-coded output (Green=success, Yellow=warning, Red=error, Cyan=info)
+
+**deploy-simple.ps1** (called by deploy.ps1):
+- 6-step orchestration: Collect params → Create RG → Create KV → Add secrets → Confirm → Deploy
+- Auto-detects IP, creates Key Vault, stores 8 secrets, then deploys Bicep
+- Default template path: `.\deployments\vm\tts-docker-deployment.bicep`
+
+**Error Handling**:
+```powershell
+$ErrorActionPreference = "Stop"  # Always fail-fast
+```
+
+### 4. Deployment Timing & Expectations
+
+| Phase | Duration | Output |
+|-------|----------|--------|
+| Pre-deployment validation | 0-30s | Deployer IP detected |
+| Key Vault provisioning | 30-90s | 8 secrets stored |
+| Bicep infrastructure | 2-5min | VM, DB, NSG, VNet created |
+| cloud-init bootstrap | 3-7min | Docker, TTS containers started |
+| Post-deployment | 30s | Console URL displayed |
+
+**Total**: 10-15 minutes for VM, 20-30 minutes for AKS
+
+### 5. Security Defaults (PRODUCTION-READY)
+
+**Always Enabled**:
+- SSH restricted to detected IP (never `*`)
+- Key Vault with RBAC
+- Private database access (no public endpoint)
+- Let's Encrypt TLS (automated renewal via cron)
+- Managed Identity for VM → Key Vault access
+
+**Network Security Group Rules** (lines 103-165):
+```bicep
+AllowSSH: TCP 22 from {detected-IP} only
+AllowHTTPS: TCP 443 from *
+AllowHTTP: TCP 80 from * (for Let's Encrypt)
+AllowLoRaWANUDP: UDP 1700 from *
+AllowGRPC: TCP 1881-1887 from *
+```
+
+### 6. Cost Structure (for recommendations)
+
+**VM Mode** (~$205/month):
+- VM (B4ms): $120, PostgreSQL (B2s): $35, Storage: $20, Networking: $10, Monitoring: $35
+
+**AKS Mode** (~$675/month):
+- AKS (3x D4s_v3): $350, PostgreSQL (GP 4vCore): $180, ACR: $20, LB: $25, Monitoring: $55
+
+**Optimization**: Reserved Instances save 40-60% (document in cost recommendations)
+
+## Development Workflows
+
+### Testing Deployments
+
+```powershell
+# Quick test deployment (auto-cleanup)
+.\deploy.ps1 -Mode quick -AdminEmail "test@example.com" -Location "centralus"
+
+# Validate Bicep without deploying
+bicep build deployments/vm/tts-docker-deployment.bicep
+az deployment group validate --template-file deployments/vm/tts-docker-deployment.bicep
+
+# Check deployment logs
+az deployment group show -g <rg-name> -n <deployment-name>
+```
+
+### Debugging Failed Deployments
+
+1. **Azure Portal**: Resource Group → Deployments → Click deployment name → Operations
+2. **cloud-init logs**: SSH to VM → `cat /var/log/cloud-init-output.log`
+3. **Docker logs**: `docker logs lorawan-stack_stack_1 -f`
+4. **Database connectivity**: `docker exec -it lorawan-stack_stack_1 psql -h <db-host> -U ttsadmin tts`
+
+### Modifying Bicep Templates
+
+**Before editing**:
+1. Read `DEPLOYMENT_FIXES_SUMMARY.md` to understand 7 critical fixes
+2. Check if change affects cloud-init (lines 530-800) - test YAML validity
+3. Validate with `bicep build` before committing
+
+**After editing**:
+1. Run `bicep build` to catch syntax errors
+2. Test deployment in isolated resource group
+3. Document changes if they affect critical fixes
+
+## File Organization & Documentation
+
+### Documentation Suite (5,500+ lines total)
+
+| File | Purpose | When to Reference |
+|------|---------|-------------------|
+| `README.md` | User-facing deployment guide | New user onboarding |
+| `docs/ARCHITECTURE.md` | Technical deep-dive (2,528 lines) | Understanding infrastructure |
+| `docs/DEPLOYMENT_ORCHESTRATION.md` | Orchestrator system guide | Understanding deploy.ps1 hierarchy |
+| `DEPLOYMENT_FIXES_SUMMARY.md` | All 7 critical fixes | **Before any Bicep changes** |
+| `SECURITY_HARDENING.md` | Production security guide | Security reviews |
+
+### Key Files to Understand
+
+**Must Read Before Changes**:
+- `deployments/vm/tts-docker-deployment.bicep` - Core infrastructure (852 lines, includes all 7 fixes)
+- `deploy-simple.ps1` - Standard orchestration (316 lines, Key Vault + secrets)
+- `deploy.ps1` - Primary entry point (menu system)
+
+**Reference for Patterns**:
+- `deployments/kubernetes/tts-aks-deployment.bicep` - AKS infrastructure patterns
+- `deployments/kubernetes/deploy-aks.ps1` - Kubernetes orchestration patterns
+
+## Common Tasks
+
+### Adding a New Deployment Parameter
+
+1. Add to Bicep template parameters (top of file)
+2. Add to `deploy-simple.ps1` script parameters
+3. Pass through in `$deploymentParams` hashtable (line 233)
+4. Update `README.md` deployment options section
+5. Update `docs/DEPLOYMENT_ORCHESTRATION.md` if affecting modes
+
+### Adding a New NSG Rule
+
+Edit `deployments/vm/tts-docker-deployment.bicep` lines 103-165:
+```bicep
+{
+  name: 'AllowNewProtocol'
+  properties: {
+    priority: 140  // Increment from last rule
+    direction: 'Inbound'
+    access: 'Allow'
+    protocol: 'Tcp'
+    sourcePortRange: '*'
+    destinationPortRange: '8080'
+    sourceAddressPrefix: '*'
+    destinationAddressPrefix: '*'
+  }
+}
+```
+
+### Updating TTS Container Version
+
+Modify cloud-init section (line ~580):
+```yaml
+services:
+  stack:
+    image: thethingsnetwork/lorawan-stack:3.x.x  # Change version
+```
+
+## What NOT to Do
+
+❌ **Never** bypass `deploy.ps1` and call sub-scripts directly (breaks orchestration)  
+❌ **Never** use `printf` for admin user password (FIX #7 - causes login failure)  
+❌ **Never** set SSH `adminSourceIP` to `*` in production (security risk)  
+❌ **Never** use heredocs in cloud-init YAML (breaks parser - see CLOUD-INIT-FIX.md)  
+❌ **Never** modify Key Vault secrets list without updating all 8 references  
+❌ **Never** change cookie key length from 64 hex chars (breaks session management)  
+❌ **Never** suggest Container Apps (UDP port 1700 not supported - see architecture docs)
+
+## Production Deployment Checklist
+
+When generating deployment code for production:
+
+1. ✅ Use `deploy.ps1 -Mode aks` for production scale (100K+ devices)
+2. ✅ Ensure SSH IP restriction is enabled (auto-detected)
+3. ✅ Enable Key Vault (`enableKeyVault=true`)
+4. ✅ Enable private database (`enablePrivateDatabaseAccess=true`)
+5. ✅ Use Let's Encrypt (never self-signed in production)
+6. ✅ Set up monitoring (Log Analytics + App Insights included by default)
+7. ✅ Document admin credentials securely
+8. ✅ Reference `SECURITY_HARDENING.md` for additional hardening
+
+## Git Branch Strategy
+
+- `master` - Stable releases
+- `azure-update-advanced` - Current development branch (where new features land)
+- Always commit with descriptive messages documenting what fixes/features are included
+
+## Questions to Ask User
+
+When requirements are unclear:
+
+- **Deployment mode**: "Are you deploying for development (quick), production (aks), or need custom configuration (vm)?"
+- **Scale**: "How many devices will connect? (determines VM size or AKS node count)"
+- **Security**: "Is this for production? (enables SSH restriction, Key Vault, private DB)"
+- **Region**: "Which Azure region? (default: centralus)"
+
+## External Resources
+
+- TTS Documentation: https://www.thethingsindustries.com/docs/
+- Azure Bicep: https://docs.microsoft.com/azure/azure-resource-manager/bicep/
+- LoRaWAN Specification: https://lora-alliance.org/resource_hub/lorawan-specification-v1-0-3/
+
+---
+
+**Remember**: This codebase is production-ready with 7 critical fixes. Preserve these fixes in all modifications. When in doubt, reference `DEPLOYMENT_FIXES_SUMMARY.md`.
