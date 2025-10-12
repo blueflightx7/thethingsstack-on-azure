@@ -1,17 +1,28 @@
 # AKS Deployment Modernization Plan
 
+## ⚠️ SCOPE: AKS Production Deployment ONLY
+
+**This plan affects ONLY the AKS/Kubernetes deployment mode (`deploy.ps1 -Mode aks`).**
+
+**VM deployments remain unchanged**:
+- ✅ Quick deployment (`deploy.ps1 -Mode quick`) - NO CHANGES
+- ✅ Custom/Advanced VM deployment (`deploy.ps1 -Mode vm`) - NO CHANGES
+- ✅ All VM-based Bicep templates (`deployments/vm/`) - UNTOUCHED
+
+---
+
 ## 🎯 Executive Summary
 
 **Current State**: Our AKS deployment uses **AKS Standard** with manual configuration.
 
-**Target State**: Modernize to **AKS Automatic** with Azure-managed services matching The Things Stack official architecture patterns, scaled for production.
+**Target State**: Modernize to **AKS Automatic** with Azure-managed services matching production best practices, scaled for 100K+ devices.
 
-**Key Gap**: The current deployment (`tts-aks-deployment.bicep`) doesn't match the simple/quick VM deployment experience at scale. We need to:
+**Key Gap**: The current AKS deployment doesn't match the simple/quick VM deployment experience at scale. We need to:
 1. Use **AKS Automatic** (Azure's modern, production-ready Kubernetes)
 2. Implement **managed ingress** (Application Routing add-on with nginx)
 3. Use **Azure Monitor managed Prometheus** (not self-hosted)
-4. Build & push TTS container images to **Azure Container Registry**
-5. Match The Things Stack's official Kubernetes architecture (adapted for Azure best practices)
+4. Use **Azure Cache for Redis Enterprise** (Redis 7.2, non-clustered mode)
+5. Build & push TTS container images to **Azure Container Registry**
 
 ---
 
@@ -38,21 +49,30 @@ Source: https://learn.microsoft.com/en-us/azure/aks/intro-aks-automatic
 
 **Cost Impact**: Standard tier (~$73/month cluster management fee) + compute
 
-### 2. **The Things Stack Official Azure Kubernetes Architecture**
-Source: https://www.thethingsindustries.com/docs/enterprise/kubernetes/azure/architecture/
+### 2. **Redis Strategy: Azure Cache for Redis Enterprise**
 
-**Key Architectural Decisions**:
-- **PostgreSQL**: Azure Database for PostgreSQL Flexible Server ✅ (matches our current design)
-- **Redis**: **In-cluster deployment** (NOT Azure Cache for Redis)
-  - Reason: Azure Cache max version is 6.0, TTS requires 6.2+
-  - Azure Managed Redis supports 7.x but only in clustered mode (TTS incompatible)
-  - **Solution**: Deploy Redis as StatefulSet in AKS
-- **Networking**: Virtual Network with NAT Gateway for egress
-- **Load Balancer**: Internal LB for incoming traffic, static Public IP
-- **Storage**: Azure Storage Containers for user uploads (profile pictures, device images)
-- **Configuration**: Terraform + Helm (we'll use Bicep + Helm)
+**UPDATED FINDING**: Azure Cache for Redis **Enterprise tier** supports Redis 7.2 with non-clustered mode!
 
-**Critical Insight**: The Things Stack officially uses **in-cluster Redis** for Azure deployments, not managed service.
+**Redis Version Support by Tier** (Microsoft docs - Oct 2025):
+| Tier | Redis Version | Clustering Options |
+|------|---------------|-------------------|
+| Basic, Standard, Premium | 6.0 (no upgrades) | OSS Clustering only (Premium) |
+| **Enterprise, Enterprise Flash** | **7.2 (auto-upgrades)** | **OSS / Enterprise / Non-Clustered** |
+
+**Non-Clustered Policy** (Enterprise tier):
+- Supported for caches **≤25 GB**
+- No data sharding - single Redis instance behavior
+- **Compatible with TTS** (no clustering requirements)
+- Use case: Migration from non-sharded Redis (matches our VM deployment)
+- Limitation: Cannot scale beyond 25 GB without changing cluster policy
+
+**Recommended Solution**: **Azure Cache for Redis Enterprise E10**
+- **Size**: 12 GB cache
+- **Clustering Policy**: Non-Clustered
+- **Redis Version**: 7.2 (automatic upgrades to future versions)
+- **SLA**: 99.99% uptime
+- **Features**: Data persistence (RDB/AOF), zone redundancy, VNet injection
+- **Cost**: ~$175/month (vs. Premium P1 at $200/month with Redis 6.0)
 
 ---
 
@@ -66,7 +86,7 @@ Source: https://www.thethingsindustries.com/docs/enterprise/kubernetes/azure/arc
 | **Ingress** | ❌ Not deployed | ✅ Managed NGINX (Application Routing) |
 | **Monitoring** | Log Analytics + App Insights (manual) | ✅ Managed Prometheus + Container Insights (automatic) |
 | **Networking** | Azure CNI (manual config) | ✅ Azure CNI Overlay + Cilium (preconfigured) |
-| **Redis** | ❌ Not deployed | ✅ StatefulSet (in-cluster, Redis 7.x) |
+| **Redis** | ❌ Not deployed | ✅ Azure Cache for Redis Enterprise (E10, non-clustered) |
 | **TTS Images** | ❌ No build pipeline | ✅ ACR Tasks (automated builds) |
 | **TLS Certificates** | ❌ Not configured | ✅ cert-manager + Let's Encrypt (via Application Routing) |
 | **Autoscaling** | Manual node scaling | ✅ Node Autoprovisioning + HPA/KEDA/VPA |
@@ -109,12 +129,6 @@ Source: https://www.thethingsindustries.com/docs/enterprise/kubernetes/azure/arc
 │  └────────────────────────────────────────────────────────────┘     │
 │                                                                     │
 │  ┌────────────────────────────────────────────────────────────┐     │
-│  │  Redis StatefulSet (in-cluster)                            │     │
-│  │  ├─► Redis 7.2 (3 replicas with persistence)               │     │
-│  │  └─► PersistentVolumeClaims (Azure Premium SSD)            │     │
-│  └────────────────────────────────────────────────────────────┘     │
-│                                                                     │
-│  ┌────────────────────────────────────────────────────────────┐     │
 │  │  Monitoring (Automatic)                                    │     │
 │  │  ├─► Managed Prometheus (metrics)                          │     │
 │  │  ├─► Container Insights (logs)                             │     │
@@ -124,6 +138,14 @@ Source: https://www.thethingsindustries.com/docs/enterprise/kubernetes/azure/arc
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                     EXTERNAL SERVICES                               │
+│                                                                     │
+│  ┌────────────────────────────────────┐                             │
+│  │  Azure Cache for Redis Enterprise  │                             │
+│  │  ├─► E10 tier (12 GB)              │                             │
+│  │  ├─► Redis 7.2 (non-clustered)     │                             │
+│  │  ├─► VNet injection (private)      │                             │
+│  │  └─► Data persistence (RDB + AOF)  │                             │
+│  └────────────────────────────────────┘                             │
 │                                                                     │
 │  ┌────────────────────────────────────┐                             │
 │  │  PostgreSQL Flexible Server        │                             │
@@ -291,7 +313,95 @@ resource uploadContainer 'Microsoft.Storage/storageAccounts/blobServices/contain
 }
 ```
 
-5. **Upgrade ACR to Premium** (for geo-replication + vulnerability scanning):
+5. **Add Azure Cache for Redis Enterprise** (Redis 7.2, non-clustered):
+```bicep
+// Redis subnet for VNet injection
+resource redisSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' = {
+  parent: vnet
+  name: 'redis-subnet'
+  properties: {
+    addressPrefix: '10.0.6.0/24'
+    delegations: [
+      {
+        name: 'Microsoft.Cache.redis'
+        properties: {
+          serviceName: 'Microsoft.Cache/redisEnterprise'
+        }
+      }
+    ]
+  }
+}
+
+resource redisEnterprise 'Microsoft.Cache/redisEnterprise@2024-02-01' = {
+  name: '${environmentName}-redis'
+  location: location
+  sku: {
+    name: 'Enterprise_E10' // 12 GB cache
+    capacity: 2 // 2 nodes for HA
+  }
+  properties: {
+    minimumTlsVersion: '1.2'
+  }
+  zones: ['1', '2', '3'] // Zone redundancy
+}
+
+resource redisDatabase 'Microsoft.Cache/redisEnterprise/databases@2024-02-01' = {
+  parent: redisEnterprise
+  name: 'default'
+  properties: {
+    clientProtocol: 'Encrypted' // TLS enabled
+    port: 10000
+    clusteringPolicy: 'EnterpriseCluster' // Non-clustered mode for TTS compatibility
+    evictionPolicy: 'NoEviction' // Never evict data
+    persistence: {
+      aofEnabled: true // Append-only file for durability
+      aofFrequency: '1s'
+      rdbEnabled: true // RDB snapshots
+      rdbFrequency: '1h'
+    }
+    modules: [] // No modules needed for TTS
+  }
+}
+
+// Private endpoint for Redis
+resource redisPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-05-01' = {
+  name: '${environmentName}-redis-pe'
+  location: location
+  properties: {
+    subnet: {
+      id: redisSubnet.id
+    }
+    privateLinkServiceConnections: [
+      {
+        name: 'redis-connection'
+        properties: {
+          privateLinkServiceId: redisEnterprise.id
+          groupIds: ['redisEnterprise']
+        }
+      }
+    ]
+  }
+}
+
+// Store Redis connection details in Key Vault
+resource redisHostSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'redis-host'
+  properties: {
+    value: '${redisEnterprise.name}.${location}.redisenterprise.cache.azure.net'
+  }
+}
+
+resource redisPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'redis-password'
+  properties: {
+    value: listKeys(redisDatabase.id, '2024-02-01').primaryKey
+  }
+}
+```
+
+6. **Upgrade ACR to Premium** (for geo-replication + vulnerability scanning):
 ```bicep
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: acrName
@@ -358,7 +468,6 @@ charts/
     ├── templates/
     │   ├── _helpers.tpl
     │   ├── namespace.yaml
-    │   ├── redis-statefulset.yaml
     │   ├── tts-deployment.yaml
     │   ├── tts-services.yaml
     │   ├── ingress.yaml
@@ -370,83 +479,7 @@ charts/
 
 **Key Files**:
 
-1. **Redis StatefulSet** (`redis-statefulset.yaml`):
-```yaml
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: redis
-  namespace: tts
-spec:
-  serviceName: redis
-  replicas: 3
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-      - name: redis
-        image: redis:7.2-alpine
-        ports:
-        - containerPort: 6379
-          name: redis
-        command:
-        - redis-server
-        - --appendonly
-        - "yes"
-        - --save
-        - "60 1000" # Persistence: save after 60s if 1000 keys changed
-        volumeMounts:
-        - name: redis-data
-          mountPath: /data
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "250m"
-          limits:
-            memory: "1Gi"
-            cpu: "500m"
-        livenessProbe:
-          tcpSocket:
-            port: 6379
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          exec:
-            command:
-            - redis-cli
-            - ping
-          initialDelaySeconds: 5
-          periodSeconds: 5
-  volumeClaimTemplates:
-  - metadata:
-      name: redis-data
-    spec:
-      accessModes: ["ReadWriteOnce"]
-      storageClassName: managed-csi-premium # Azure Premium SSD
-      resources:
-        requests:
-          storage: 20Gi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  namespace: tts
-spec:
-  clusterIP: None # Headless service
-  selector:
-    app: redis
-  ports:
-  - port: 6379
-    targetPort: 6379
-```
-
-2. **TTS Deployment** (`tts-deployment.yaml`):
+1. **TTS Deployment** (`tts-deployment.yaml`) - Connects to Azure Cache for Redis Enterprise:
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -483,8 +516,19 @@ spec:
         env:
         - name: TTN_LW_BLOB_LOCAL_DIRECTORY
           value: /srv/ttn-lorawan/public/blob
+        # Azure Cache for Redis Enterprise connection
         - name: TTN_LW_REDIS_ADDRESS
-          value: redis-0.redis.tts.svc.cluster.local:6379
+          valueFrom:
+            secretKeyRef:
+              name: tts-secrets
+              key: redis-host  # From Key Vault: <name>.<region>.redisenterprise.cache.azure.net:10000
+        - name: TTN_LW_REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: tts-secrets
+              key: redis-password  # From Key Vault
+        - name: TTN_LW_REDIS_TLS
+          value: "true"  # Redis Enterprise uses TLS
         - name: TTN_LW_IS_DATABASE_URI
           valueFrom:
             secretKeyRef:
@@ -531,6 +575,54 @@ spec:
       - name: blob-storage
         persistentVolumeClaim:
           claimName: tts-blob-storage
+```
+
+2. **values.yaml** - Configuration defaults:
+```yaml
+image:
+  repository: <acr-name>.azurecr.io/thethingsstack
+  tag: "3.30.2"
+  pullPolicy: IfNotPresent
+
+# Azure Cache for Redis Enterprise connection
+redis:
+  enabled: true  # Using Azure-managed Redis
+  # Connection details injected via Key Vault secrets:
+  #   - redis-host (e.g., tts-redis.centralus.redisenterprise.cache.azure.net:10000)
+  #   - redis-password
+  # TLS enabled by default for Enterprise tier
+
+database:
+  # PostgreSQL connection from Key Vault
+  sslMode: require
+
+domain: tts.example.com
+adminEmail: admin@example.com
+
+# Resource requests/limits
+resources:
+  requests:
+    memory: "2Gi"
+    cpu: "1000m"
+  limits:
+    memory: "4Gi"
+    cpu: "2000m"
+
+# Horizontal Pod Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# Gateway UDP LoadBalancer
+gatewayPublicIP: ""  # Populated by deployment script
+resourceGroup: ""    # Populated by deployment script
+
+# Monitoring
+monitoring:
+  enabled: true
+  scrapeInterval: 30s
 ```
 
 3. **Ingress** (`ingress.yaml` - uses Application Routing):
@@ -696,14 +788,13 @@ Write-Host "  4. View logs: kubectl logs -n tts -l app=tts-stack -f"
 | Key Vault | $5 |
 | **TOTAL** | **$1,080** |
 
-### Modern AKS Automatic Deployment (~$900/month)
+### Modern AKS Automatic Deployment (~$1,025/month)
 | Component | Cost |
 |-----------|------|
 | AKS Automatic Standard tier (cluster mgmt) | $73 |
 | Node Autoprovisioning (avg 3x D4s_v3) | $350 |
 | PostgreSQL Standard_D4s_v3 (zone-redundant) | $360 |
-| ~~Azure Cache for Redis~~ (removed) | ~~$200~~ → **$0** |
-| Redis StatefulSet storage (60 GB Premium SSD) | $12 |
+| **Azure Cache for Redis Enterprise E10** | **$175** |
 | Standard Load Balancer | $20 |
 | Managed NAT Gateway | $45 |
 | ACR Premium (with geo-replication) | $40 |
@@ -713,13 +804,18 @@ Write-Host "  4. View logs: kubectl logs -n tts -l app=tts-stack -f"
 | Storage Account (blob uploads) | $10 |
 | Networking | $30 |
 | Key Vault | $5 |
-| **TOTAL** | **~$900/month** |
+| **TOTAL** | **~$1,025/month** |
 
-**Savings**: ~$180/month (-17%) with **better features** (auto-scaling, managed monitoring, automatic upgrades)
+**Cost Impact**: ~$55/month (-5%) with **significantly better features**:
+- ✅ Redis 7.2 (vs. 6.0 in Premium tier)
+- ✅ Fully managed (no StatefulSet operational burden)
+- ✅ 99.99% SLA (vs. manual HA setup)
+- ✅ Auto-scaling nodes + monitoring
+- ✅ Automatic security patches
 
 **With Reserved Instances** (3-year):
 - Node compute: $350 → $140 (60% savings)
-- **New Total**: ~$690/month (-36% vs. current)
+- **New Total**: ~$815/month (-24% vs. current)
 
 ---
 
