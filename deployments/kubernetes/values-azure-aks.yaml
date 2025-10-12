@@ -1,0 +1,264 @@
+# The Things Stack Helm Chart Values for Azure AKS Automatic
+# Based on official TTS Helm chart: registry-1.docker.io/thethingsindustries/lorawan-stack-helm-chart
+# Reference: https://www.thethingsindustries.com/docs/enterprise/kubernetes/generic/configuration/
+
+# =============================================================================
+# GLOBAL CONFIGURATION
+# =============================================================================
+global:
+  # Domain where The Things Stack is exposed (e.g., tts.example.com)
+  # REQUIRED: Set via --set global.domain=<your-domain> during deployment
+  domain: ""
+  
+  deployment:
+    initialTenant:
+      # ID of the initial (first) tenant
+      tenantID: "default"
+      # REQUIRED: Password for the Administrator - from Key Vault
+      adminPassword: ""  # Injected via --set during deployment
+      # User ID for the Administrator (do NOT use 'admin')
+      adminUserID: "admin-user"
+      # REQUIRED: Email of the Administrator
+      adminEmail: ""  # Injected via --set during deployment
+  
+  # =============================================================================
+  # BLOB STORAGE (Azure Storage Account)
+  # =============================================================================
+  blob:
+    provider: "azure"  # Using Azure Blob Storage
+    azure:
+      # REQUIRED: Storage account name - injected during deployment
+      accountName: ""
+      # REQUIRED: Managed Identity client ID for workload identity
+      clientID: ""
+  
+  # =============================================================================
+  # CLUSTER KEYS (Generated during preparation)
+  # =============================================================================
+  cluster:
+    # REQUIRED: Base64-encoded cluster authentication keys
+    # Generated via: openssl rand -base64 32
+    keys: ""  # Injected from Key Vault during deployment
+  
+  # =============================================================================
+  # HTTP CONFIGURATION
+  # =============================================================================
+  http:
+    cookie:
+      # REQUIRED: 64-character hex strings for session cookies
+      blockKey: ""  # Injected from Key Vault (cookie-block-key)
+      hashKey: ""   # Injected from Key Vault (cookie-hash-key)
+    metrics:
+      # Password for metrics endpoint (optional but recommended)
+      password: ""
+    pprof:
+      # Password for pprof endpoint (optional)
+      password: ""
+  
+  # =============================================================================
+  # REDIS CONFIGURATION (Azure Cache for Redis Enterprise E10)
+  # =============================================================================
+  redis:
+    # REQUIRED: Redis Enterprise endpoint (format: <name>.<region>.redisenterprise.cache.azure.net:10000)
+    address: ""  # Injected during deployment
+    # REQUIRED: Redis access key
+    password: ""  # Injected from Key Vault
+    # Optional: Read-only replica (not used with single E10 instance)
+    readOnly:
+      address: ""
+      password: ""
+  
+  # =============================================================================
+  # CONSOLE OAUTH
+  # =============================================================================
+  console:
+    oauth:
+      # REQUIRED: OAuth client secret for console
+      clientSecret: "console"  # Standard value for TTS
+  
+  # =============================================================================
+  # INGRESS (Application Routing Add-on with nginx)
+  # =============================================================================
+  ingress:
+    # Ingress controller class (AKS Application Routing)
+    controller: "webapprouting.kubernetes.azure.com"
+    tls:
+      # REQUIRED: Secret name for TLS certificates (managed by cert-manager)
+      secretName: "tts-tls-cert"
+  
+  # =============================================================================
+  # TENANCY
+  # =============================================================================
+  tenancy:
+    # Admin API key for multi-tenant management
+    adminKey: ""  # Optional, injected if multi-tenancy enabled
+  
+  # =============================================================================
+  # INTEROPERABILITY (Optional)
+  # =============================================================================
+  interop:
+    # Configuration source: "blob", "directory", "url", or empty to disable
+    configSource: ""  # Disabled by default
+    blob:
+      bucket: ""
+
+# =============================================================================
+# IDENTITY SERVER (PostgreSQL Database)
+# =============================================================================
+is:
+  # REQUIRED: PostgreSQL connection string
+  # Format: postgres://<username>:<password>@<host>:<port>/<database>?sslmode=require
+  database:
+    uri: ""  # Injected during deployment from Key Vault
+  
+  # Profile pictures storage (Azure Blob Storage)
+  profilePictures:
+    bucket: "profile-pictures"
+  
+  # End device pictures storage (Azure Blob Storage)
+  endDevicePictures:
+    bucket: "device-pictures"
+
+# =============================================================================
+# DEVICE CLAIMING SERVER (Optional)
+# =============================================================================
+dcs:
+  edcs:
+    blob:
+      bucket: ""  # Optional: End Device Claiming Server bucket
+
+# =============================================================================
+# KUBERNETES RESOURCES
+# =============================================================================
+# Resource requests and limits for TTS pods
+resources:
+  requests:
+    memory: "2Gi"
+    cpu: "1000m"
+  limits:
+    memory: "4Gi"
+    cpu: "2000m"
+
+# =============================================================================
+# AUTOSCALING
+# =============================================================================
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# =============================================================================
+# MONITORING (Prometheus Integration)
+# =============================================================================
+monitoring:
+  enabled: true
+  # ServiceMonitor for Azure Monitor Managed Prometheus
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      prometheus: kube-prometheus
+
+# =============================================================================
+# ANNOTATIONS (Application Routing / nginx)
+# =============================================================================
+annotations:
+  # Ingress annotations for Application Routing
+  ingress:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"  # Max upload size
+  
+  # Service annotations
+  service:
+    # Enable Azure Monitor Prometheus scraping
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+
+# =============================================================================
+# GATEWAY CONFIGURATION
+# =============================================================================
+gateway:
+  # UDP LoadBalancer for LoRaWAN gateway traffic
+  udp:
+    enabled: true
+    port: 1700
+    # Static public IP (assigned during deployment)
+    loadBalancerIP: ""
+    # Service type (LoadBalancer for public access)
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/azure-load-balancer-resource-group: ""  # Injected
+
+# =============================================================================
+# STORAGE (Persistent Volume for local blobs - if not using Azure Blob)
+# =============================================================================
+storage:
+  # Only needed if global.blob.provider is "local"
+  enabled: false
+  pvc:
+    name: "tts-blob-storage"
+    storageClass: "managed-csi-premium"
+    size: "50Gi"
+    accessModes:
+      - ReadWriteMany
+
+# =============================================================================
+# SECURITY
+# =============================================================================
+security:
+  # Pod Security Context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 886
+    fsGroup: 886
+    seccompProfile:
+      type: RuntimeDefault
+  
+  # Container Security Context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false  # TTS needs write access to /tmp
+
+# =============================================================================
+# WORKLOAD IDENTITY (Azure AD Integration)
+# =============================================================================
+workloadIdentity:
+  enabled: true
+  # REQUIRED: Azure AD Application (Client) ID
+  clientId: ""  # Injected during deployment
+  # REQUIRED: Azure AD Tenant ID
+  tenantId: ""  # Injected during deployment
+
+# =============================================================================
+# NODE SELECTOR / TOLERATIONS / AFFINITY
+# =============================================================================
+nodeSelector: {}
+tolerations: []
+affinity:
+  # Prefer spreading pods across zones for HA
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - lorawan-stack
+          topologyKey: topology.kubernetes.io/zone
+
+# =============================================================================
+# ADVANCED CONFIGURATION (Optional Overrides)
+# =============================================================================
+# Override specific TTS component configurations if needed
+# See values.yaml from official chart for all available options
