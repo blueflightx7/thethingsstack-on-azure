@@ -29,7 +29,10 @@ param(
     [switch]$SkipInfrastructure,
     
     [Parameter(Mandatory=$false)]
-    [switch]$UseRedisEnterprise  # Use Azure Cache for Redis Enterprise instead of in-cluster
+    [switch]$UseRedisEnterprise,  # Use Azure Cache for Redis Enterprise instead of in-cluster
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$InfrastructureOnly  # Deploy infrastructure only (no Helm/kubectl required)
 )
 
 $ErrorActionPreference = "Stop"
