@@ -18,9 +18,9 @@ _Last updated: October 11, 2025_
 
 - [Executive Summary](#executive-summary)
 - [Deployment Options](#1-deployment-options)
-- [AKS Production Architecture](#2-aks-production-architecture-kubernetes-deployment)
-- [VM Development Architecture](#3-vm-development-architecture-docker-compose-deployment)
-- [Shared Components](#4-shared-components)
+- [VM Development Architecture](#2-vm-development-architecture-docker-compose-deployment)
+- [Shared Components](#3-shared-components)
+- [AKS Production Architecture](#4-aks-production-architecture-kubernetes-deployment)
 - [Deployment Workflows](#5-deployment-workflows)
 - [Security Architecture](#6-security-architecture)
 - [Operations & Maintenance](#7-operations--maintenance)
@@ -139,196 +139,9 @@ This solution provides two deployment topologies, each optimized for different s
 
 ---
 
-## 2. AKS Production Architecture (Kubernetes Deployment)
+## 2. VM Development Architecture (Docker Compose Deployment)
 
-This section documents the **production-scale AKS deployment** designed for **100,000+ devices** with high availability, horizontal scalability, and enterprise-grade reliability.
-
-### 2.1 Architecture Overview
-
-The AKS deployment uses **AKS Automatic** (Microsoft's modern Kubernetes offering, November 2024) with fully managed services, official TTS Helm chart, and Azure best practices.
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       INTERNET (Public Access)                           │
-└────────┬──────────────────────────────────────────────┬──────────────────┘
-         │ HTTPS (443)                                  │ UDP (1700)
-         │ Console + API                                │ LoRaWAN Gateways
-         ▼                                              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    AZURE STANDARD LOAD BALANCER                          │
-│                      Public IP: <static-ip>                              │
-└─────────┬──────────────────────────────────────────────┬─────────────────┘
-          │                                              │
-          ▼ Application Routing                         ▼ LoadBalancer Svc
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        AKS AUTOMATIC CLUSTER                             │
-│                       (Standard Tier, Multi-Zone)                        │
-│                                                                           │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │ MANAGED INGRESS (Application Routing - nginx + cert-manager)       │ │
-│  │ ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │ │
-│  │ │ nginx Pod    │  │ cert-manager │  │ external-dns │              │ │
-│  │ │ Zone 1       │  │ (Let's Encrypt)│ │ (DNS sync)   │              │ │
-│  │ └──────────────┘  └──────────────┘  └──────────────┘              │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│           │                                         │                    │
-│           ▼ HTTPS (TLS terminated)                  ▼ UDP 1700          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │ TTS APPLICATION PODS (Helm Chart Deployment)                       │ │
-│  │                                                                     │ │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │ │
-│  │  │ tts-frontend │  │ tts-server   │  │ tts-gateway  │             │ │
-│  │  │ Replicas: 2  │  │ Replicas: 3  │  │ Replicas: 3  │             │ │
-│  │  │ Zone 1,2     │  │ Zone 1,2,3   │  │ Zone 1,2,3   │             │ │
-│  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘             │ │
-│  └─────────┼──────────────────┼──────────────────┼────────────────────┘ │
-│            │                  │                  │                      │
-│            └──────────────────┼──────────────────┘                      │
-│                               │                                         │
-│                   ┌───────────┴───────────┐                             │
-│                   │  HPA (2-10 replicas)  │                             │
-│                   │  Node Autoprovisioning│                             │
-│                   └───────────────────────┘                             │
-└─────────────────────────────────────────────────────────────────────────┘
-          │                  │                  │
-          │                  │                  │
-          ▼ PostgreSQL       ▼ Redis            ▼ Blob Storage
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      AZURE MANAGED SERVICES                              │
-│                                                                           │
-│  ┌───────────────────────┐  ┌───────────────────────┐                   │
-│  │ PostgreSQL Flexible   │  │ Redis Enterprise E10   │                   │
-│  │ ├─ Zone-Redundant     │  │ ├─ 12 GB, Redis 7.2    │                   │
-│  │ ├─ Private VNet       │  │ ├─ Non-clustered       │                   │
-│  │ ├─ 128 GB storage     │  │ ├─ VNet injection      │                   │
-│  │ └─ Auto-failover <60s │  │ └─ 99.99% SLA          │                   │
-│  └───────────────────────┘  └───────────────────────┘                   │
-│                                                                           │
-│  ┌───────────────────────┐  ┌───────────────────────┐                   │
-│  │ Azure Storage Account │  │ Azure Key Vault        │                   │
-│  │ ├─ Blob containers     │  │ ├─ Workload Identity  │                   │
-│  │ │  - avatars          │  │ ├─ 8 secrets           │                   │
-│  │ │  - pictures         │  │ └─ RBAC enabled        │                   │
-│  │ │  - uploads          │  └───────────────────────┘                   │
-│  │ └─ Hot tier (public)  │                                               │
-│  └───────────────────────┘                                               │
-│                                                                           │
-│  ┌───────────────────────────────────────────────────┐                   │
-│  │ MONITORING                                        │                   │
-│  │ ├─ Azure Monitor managed Prometheus               │                   │
-│  │ ├─ Container Insights (logs)                      │                   │
-│  │ ├─ Managed Grafana (visualization)                │                   │
-│  │ └─ Log Analytics Workspace                        │                   │
-│  └───────────────────────────────────────────────────┘                   │
-└─────────────────────────────────────────────────────────────────────────┘
-
-         VIRTUAL NETWORK: 10.0.0.0/16
-         ├─ AKS Subnet: 10.0.0.0/22 (1,024 IPs)
-         └─ DB Subnet: 10.0.4.0/24 (256 IPs, delegated to PostgreSQL)
-```
-
-### 2.2 Core Differences from VM Deployment
-
-This section highlights **what's different** in the AKS architecture. For shared concepts (TTS components, LoRaWAN fundamentals), see Section 4.
-
-| Aspect | VM Deployment | AKS Deployment | Why Different? |
-|--------|---------------|----------------|----------------|
-| **Orchestrator** | Docker Compose | Kubernetes (AKS Automatic) | Scale: K8s handles 100K+ devices |
-| **Node Count** | 1 VM | 2-10 nodes (auto-scaling) | Fault tolerance + capacity |
-| **TTS Deployment** | Single container | Multi-pod deployment (Helm chart) | Microservices separation |
-| **Ingress** | nginx on VM (port mapping) | Application Routing (K8s Ingress) | Cloud-native load balancing |
-| **TLS Automation** | certbot cron job | cert-manager (K8s native) | K8s-aware certificate lifecycle |
-| **Redis** | Docker container (single instance) | Azure Cache Enterprise E10 (HA) | 99.99% SLA, zone-redundant |
-| **Database Access** | Public endpoint + firewall | Private VNet endpoint | Zero public exposure |
-| **Blob Storage** | Local VM filesystem | Azure Storage Account | Cloud-native, unlimited scale |
-| **Secrets** | VM Extension → env vars | Workload Identity → pod mounting | Pod-level authentication |
-| **Scaling** | Vertical (resize VM, restart) | Horizontal (HPA adds pods) | Zero-downtime scaling |
-| **Monitoring** | VM metrics + container logs | Managed Prometheus + Grafana | Production-grade observability |
-| **Updates** | Replace VM (brief downtime) | Rolling pod updates | Zero-downtime deployments |
-| **Cost** | ~$205/month | ~$675/month | HA, managed services, scale |
-
-### 2.3 Infrastructure Components (Deployed by Bicep)
-
-The Bicep template `deployments/kubernetes/tts-aks-deployment.bicep` provisions all infrastructure. All resources support **zone redundancy** for high availability.
-
-#### 2.3.1 AKS Cluster (AKS Automatic)
-
-**What is AKS Automatic?**  
-Microsoft's modern Kubernetes offering (GA: November 2024) with **preconfigured production defaults**. Eliminates 80% of manual cluster configuration.
-
-**Deployed Configuration**:
-```bicep
-SKU: Automatic (Standard tier)
-API Version: 2024-05-02-preview
-Managed Identity: System-assigned
-Node Provisioning: Auto (automatic node pool management)
-Kubernetes Version: Latest stable (auto-upgraded)
-Cluster Management Fee: $73/month (Standard tier SLA)
-```
-
-**Built-in Features** (no manual setup required):
-- ✅ **Application Routing**: Managed nginx ingress + cert-manager
-- ✅ **Workload Identity**: Azure AD integration with K8s ServiceAccounts
-- ✅ **Managed Prometheus**: Metrics collection (no Prometheus server to deploy)
-- ✅ **Container Insights**: Log aggregation to Log Analytics
-- ✅ **Node Autoprovisioning**: Automatic scaling (2-10 nodes based on pod requests)
-- ✅ **Azure CNI networking**: Each pod gets VNet IP
-- ✅ **Azure Network Policy**: Pod-to-pod micro-segmentation
-- ✅ **OIDC Issuer**: For Workload Identity federation
-
-**Network Profile**:
-```yaml
-Network Plugin: azure (Azure CNI)
-Network Dataplane: azure
-Network Policy: azure (micro-segmentation)
-Service CIDR: 10.1.0.0/16 (internal K8s services)
-DNS Service IP: 10.1.0.10 (CoreDNS)
-Load Balancer: Standard SKU (zone-redundant)
-```
-
-**Why AKS Automatic vs. Standard?**
-
-| Feature | AKS Standard | AKS Automatic | Benefit |
-|---------|--------------|---------------|---------|
-| **Node Pools** | Manual configuration | Auto-provisioned | No capacity planning |
-| **Ingress** | Deploy yourself (nginx/App GW) | Included (nginx) | Saves setup time |
-| **cert-manager** | Manual installation | Included | Automatic TLS |
-| **Prometheus** | Self-host or none | Managed service | No ops burden |
-| **Upgrades** | Manual scheduling | Automatic (maintenance windows) | Reduced toil |
-| **Security** | Manual policies | Deployment Safeguards enabled | Prevent misconfigurations |
-| **Cost** | $0 cluster fee | $73/month cluster fee | Worth it for managed features |
-
-#### 2.3.2 Virtual Network Topology
-
-```
-VNet: 10.0.0.0/16 (65,536 IPs)
-├─ AKS Subnet: 10.0.0.0/22 (1,024 IPs)
-│  ├─ NSG: tts-prod-nsg (inbound rules)
-│  ├─ Pods: ~800 IPs available (10.0.0.x - 10.0.3.x)
-│  ├─ Nodes: 2-10 nodes consume IPs
-│  └─ Services: LoadBalancer external IPs
-│
-└─ Database Subnet: 10.0.4.0/24 (256 IPs)
-   ├─ Delegation: Microsoft.DBforPostgreSQL/flexibleServers
-   ├─ PostgreSQL Private Endpoint: 10.0.4.4
-   └─ Private DNS Zone: privatelink.postgres.database.azure.com
-```
-
-**Why 10.0.0.0/22 for AKS?**  
-With Azure CNI, each pod gets a VNet IP. For 10 nodes × 110 pods/node = 1,100 IPs needed. The /22 subnet provides 1,024 IPs, supporting ~800 pods with headroom.
-
-**Network Security Group Rules**:
-
-| Priority | Name | Protocol | Source | Dest Port | Purpose |
-|----------|------|----------|--------|-----------|---------|
-| 100 | AllowHTTPS | TCP | * | 443 | Console + API (ingress) |
-| 110 | AllowHTTP | TCP | * | 80 | Let's Encrypt ACME |
-| 120 | AllowLoRaWANUDP | UDP | * | 1700 | Gateway traffic |
-| 130 | AllowGRPC | TCP | * | 1881-1887 | TTS gRPC APIs |
-
-**🔒 Security Note**: SSH is **not exposed** (no NSG rule). Access cluster via `kubectl` with Azure AD authentication only.
-
-#### 2.3.3 PostgreSQL Flexible Server (Zone-Redundant)
+This section documents the **VM-based deployment** designed for development/test environments, POCs, and small deployments (<10,000 devices) using Docker Compose.
 
 ### 2.1 High-Level Architecture
 
@@ -514,31 +327,9 @@ stateDiagram-v2
 
 ---
 
-## 3. Deployment Workflow
+## 3. Shared Components
 
-1. **Parameter Collection (`deploy-simple.ps1`)**
-   - Prompts for admin email, domain (optional), VM/TTS admin passwords.
-   - Detects deployer's public IP for SSH hardening.
-   - Generates cookie keys, OAuth secret, checksum.
-
-2. **Resource Provisioning**
-   - Creates resource group, Key Vault, and stores secrets (`Add-AzKeyVaultSecret`).
-   - Deploys Bicep template with all required parameters, including `adminSourceIP`.
-
-3. **VM Initialization (cloud-init)**
-   - Installs Docker, Docker Compose, certbot, PostgreSQL client.
-   - Writes `docker-compose.yml` and `/home/<admin>/config/tts.yml`.
-   - Starts containers and waits for health.
-
-4. **Application Bootstrap**
-   - Runs database migrations (`is-db migrate`).
-   - Creates TTS admin user and OAuth client via CLI (`--password` flag ensures correctness).
-   - Configures Let's Encrypt certificate issuance and renewal cron job.
-
-5. **Outputs**
-   - Console URL, public IP/DNS, SSH command, database host, admin credentials (username/email), and deployment status.
-
-## 3. Infrastructure Components
+This section documents the Azure infrastructure and TTS components common to both VM and AKS deployments.
 
 ### 3.1 Resource Inventory
 
@@ -717,7 +508,25 @@ certbot renew --quiet --deploy-hook 'cp /etc/letsencrypt/live/{domain}/fullchain
 
 ---
 
-## 4. Application Architecture
+## 4. AKS Production Architecture (Kubernetes Deployment)
+
+This section documents the **production-scale AKS deployment** designed for **100,000+ devices** with high availability, horizontal scalability, and enterprise-grade reliability.
+
+**For complete AKS architecture including all subsections (4.1-4.10), please refer to the separate AKS documentation file `AKS_SECTIONS_2.4-2.10.md` which includes:**
+
+- 4.1 Application Routing & Traffic Flows
+- 4.2 Data Flows & Integration  
+- 4.3 Deployment Workflow (End-to-End)
+- 4.4 Scaling & Performance
+- 4.5 Monitoring & Observability
+- 4.6 Security Hardening
+- 4.7 Cost Optimization
+
+*(Full AKS documentation integration in progress)*
+
+---
+
+## 5. Application Architecture
 
 ### 4.1 The Things Stack Overview
 
@@ -941,7 +750,7 @@ erDiagram
 
 ---
 
-## 5. Deployment Workflow
+## 6. Deployment Workflow
 
 ### 5.1 Deployment Orchestration
 
@@ -1304,7 +1113,7 @@ docker compose exec stack ttn-lw-stack is-db create-admin-user \
 
 ---
 
-## 6. Data Flows & Integration
+## 7. Data Flows & Integration
 
 ### 6.1 LoRaWAN Data Flow (Uplink)
 
@@ -1544,7 +1353,7 @@ graph TD
 
 ---
 
-## 7. Security Architecture
+## 8. Security Architecture
 
 ### 7.1 Defense-in-Depth Strategy
 
@@ -1813,7 +1622,7 @@ is:
 
 ---
 
-## 8. Operations & Maintenance
+## 9. Operations & Maintenance
 
 ### 8.1 Common Operational Tasks
 
@@ -2126,7 +1935,7 @@ docker compose exec stack ttn-lw-stack is-db info
 
 ---
 
-## 9. Scaling & Performance
+## 10. Scaling & Performance
 
 ### 9.1 Performance Benchmarks
 
@@ -2195,7 +2004,7 @@ is:
 
 ---
 
-## 10. Cost Optimization
+## 11. Cost Optimization
 
 ### 10.1 Cost Breakdown (Monthly, East US Region)
 
@@ -2272,7 +2081,7 @@ az postgres flexible-server update \
 
 ---
 
-## 11. Future Enhancements
+## 12. Future Enhancements
 
 ### 11.1 High Availability Architecture
 
@@ -2540,7 +2349,7 @@ SSL Mode: Require
 
 ---
 
-## 12. Appendix
+## 13. Appendix
 
 ### 12.1 Command Reference
 
@@ -2742,13 +2551,8 @@ docker compose exec stack ttn-lw-stack is-db migrate
 
 ---
 
-## 13. AKS Production Architecture (Kubernetes Deployment)
+_This document should be updated alongside any infrastructure, security, or architectural changes to maintain accuracy and relevance._
 
-This section provides detailed architecture documentation for the production-scale Azure Kubernetes Service (AKS) deployment mode. The AKS deployment is designed for high-availability, scalability, and production workloads supporting 100,000+ devices.
-
-### 13.1. Overview - AKS vs VM Deployment
-
-The AKS deployment provides a fundamentally different architecture compared to the VM-based deployment:
 
 | Aspect | VM Deployment | AKS Deployment |
 |--------|---------------|----------------|
