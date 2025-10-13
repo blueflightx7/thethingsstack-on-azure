@@ -61,6 +61,11 @@ This repository provides **Infrastructure as Code (IaC)** for deploying [The Thi
 | **Console** | Web-based management interface with OAuth 2.0 authentication |
 | **Scalability** | Vertical scaling (VM resize) or horizontal (AKS migration) |
 
+**📖 See**: 
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Complete architecture documentation
+- [Quick Start](#-quick-start) - Get started in minutes
+- [Deployment Options](#-deployment-options) - Choose your deployment mode
+
 ---
 
 ## 🚀 Quick Start
@@ -301,7 +306,10 @@ After deployment completes (~10 minutes):
 | **Security** | Key Vault, Managed Identity | Secrets management |
 | **Observability** | Monitor, Log Analytics | Logging and metrics |
 
-**📖 See**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for comprehensive architecture documentation (2,500+ lines)
+**📖 See**: 
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Comprehensive architecture guide (2,500+ lines)
+- [docs/DEPLOYMENT_ORCHESTRATION.md](docs/DEPLOYMENT_ORCHESTRATION.md) - Deployment system details
+- [docs/CI-CD-ARCHITECTURE.md](docs/CI-CD-ARCHITECTURE.md) - CI/CD pipeline architecture
 
 ---
 
@@ -388,6 +396,11 @@ bicep build deployments/kubernetes/tts-aks-deployment.bicep
 
 # Upload to Azure Portal → Deploy custom template
 ```
+
+**📖 See**: 
+- [docs/DEPLOYMENT-PARAMETERS-GUIDE.md](docs/DEPLOYMENT-PARAMETERS-GUIDE.md) - Complete parameter reference (27KB)
+- [docs/DEPLOYMENT_ORCHESTRATION.md](docs/DEPLOYMENT_ORCHESTRATION.md) - Orchestration system guide
+- [docs/CI-CD-SETUP-GUIDE.md](docs/CI-CD-SETUP-GUIDE.md) - CI/CD pipeline setup
 
 ---
 
@@ -493,9 +506,9 @@ This deployment includes **7 critical security fixes** identified during product
 | **#7** | **Admin password stdin bug** | **Use `--password` flag instead of printf** | ✅ **Fixed** |
 
 **📖 See**: 
-- [DEPLOYMENT_FIXES_SUMMARY.md](DEPLOYMENT_FIXES_SUMMARY.md) - All 7 fixes detailed
-- [SECURITY_FIX_SUMMARY.md](SECURITY_FIX_SUMMARY.md) - Security-specific fixes (#6, #7)
-- [LOGIN_FIX.md](LOGIN_FIX.md) - Admin authentication fix (#7)
+- [docs/DEPLOYMENT_FIXES_SUMMARY.md](docs/DEPLOYMENT_FIXES_SUMMARY.md) - All 7 fixes detailed
+- [docs/SECURITY_FIX_SUMMARY.md](docs/SECURITY_FIX_SUMMARY.md) - Security-specific fixes (#6, #7)
+- [docs/LOGIN_FIX.md](docs/LOGIN_FIX.md) - Admin authentication fix (#7)
 
 ---
 
@@ -565,7 +578,9 @@ VM Managed Identity → Key Vault (read secrets during cloud-init)
 TTS Container → Secrets injected into tts.yml
 ```
 
-**📖 See**: [SECURITY_HARDENING.md](SECURITY_HARDENING.md) for production security checklist
+**📖 See**: 
+- [docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md) - Production security checklist
+- [docs/ARCHITECTURE.md § Security Architecture](docs/ARCHITECTURE.md#7-security-architecture) - Threat model & compliance
 
 ---
 
@@ -1309,7 +1324,9 @@ Before going to production, ensure:
 - [ ] **Enable geo-redundant backups** for PostgreSQL
 - [ ] **Purchase Reserved Instances** for cost savings
 
-**📖 See**: [SECURITY_HARDENING.md](SECURITY_HARDENING.md) for complete checklist
+**📖 See**: 
+- [docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md) - Complete production checklist
+- [docs/ARCHITECTURE.md § Operations](docs/ARCHITECTURE.md#8-operations--maintenance) - Operational procedures
 
 ---
 
