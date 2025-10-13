@@ -7,7 +7,9 @@
 Connect-AzAccount
 
 # 2. Deploy
-.\deploy-simple.ps1 -AdminEmail "your@email.com"
+```powershell
+.\deployments\vm\deploy-simple.ps1 -AdminEmail "your@email.com"
+```
 
 # 3. Wait 10-15 minutes for initialization
 # 4. Access console at the URL provided
@@ -19,13 +21,13 @@ Connect-AzAccount
 
 ```powershell
 # Simple deployment
-.\deploy-simple.ps1 -AdminEmail "admin@example.com"
+.\deployments\vm\deploy-simple.ps1 -AdminEmail "admin@example.com"
 
 # Custom location
-.\deploy-simple.ps1 -Location "eastus" -AdminEmail "admin@example.com"
+.\deployments\vm\deploy-simple.ps1 -Location "eastus" -AdminEmail "admin@example.com"
 
 # Advanced deployment with all options
-.\deploy.ps1 -Location "centralus" -EnvironmentName "tts-prod" -AdminEmail "admin@example.com" -VMSize "Standard_B4ms"
+.\deploy.ps1 -Location "centralus" -EnvironmentName "ttsprod" -AdminEmail "admin@example.com" -VMSize "Standard_B4ms"
 ```
 
 ### Validation

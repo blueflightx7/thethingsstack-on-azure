@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "Central US"
+    },
+    "environmentName": {
+      "value": "tts-docker"
+    },
+    "adminUsername": {
+      "value": "ttsadmin"
+    },
+    "adminPassword": {
+      "value": ""
+    },
+    "vmSize": {
+      "value": "Standard_B4ms"
+    },
+    "domainName": {
+      "value": ""
+    },
+    "adminEmail": {
+      "value": "admin@example.com"
+    },
+    "adminSourceIP": {
+      "value": "*"
+    },
+    "enablePrivateDatabaseAccess": {
+      "value": false
+    },
+    "enableKeyVault": {
+      "value": false
+    }
+  }
+}

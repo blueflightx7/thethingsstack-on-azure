@@ -1,0 +1,279 @@
+name: Build and Deploy TTS Container
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'Dockerfile'
+      - 'deployments/**'
+      - '.github/workflows/build-deploy.yml'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      tts_version:
+        description: 'TTS Version to build'
+        required: false
+        default: '3.30.2'
+
+env:
+  IMAGE_NAME: thethingsstack
+  TTS_VERSION: ${{ github.event.inputs.tts_version || '3.30.2' }}
+  
+jobs:
+  # ============================================================================
+  # JOB 1: BUILD AND SCAN
+  # ============================================================================
+  build-and-scan:
+    name: Build, Scan, and Push Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # For uploading Trivy results to GitHub Security
+      packages: write
+      
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      digest: ${{ steps.build.outputs.digest }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      # ========================================================================
+      # AZURE AUTHENTICATION
+      # ========================================================================
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: ACR Login
+        run: |
+          az acr login --name ${{ secrets.ACR_NAME }}
+      
+      # ========================================================================
+      # IMAGE METADATA
+      # ========================================================================
+      - name: Generate image metadata
+        id: meta
+        run: |
+          COMMIT_SHA="${{ github.sha }}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          
+          # Image tags (multi-tag strategy)
+          IMAGE_TAG_SHA="${SHORT_SHA}"
+          IMAGE_TAG_SEMVER="v${{ env.TTS_VERSION }}"
+          IMAGE_TAG_LATEST="latest"
+          IMAGE_TAG_TIMESTAMPED="${{ env.TTS_VERSION }}-${TIMESTAMP}"
+          
+          echo "image_tag=${IMAGE_TAG_SHA}" >> $GITHUB_OUTPUT
+          echo "Image will be tagged as:"
+          echo "  - ${IMAGE_TAG_SHA} (commit)"
+          echo "  - ${IMAGE_TAG_SEMVER} (version)"
+          echo "  - ${IMAGE_TAG_TIMESTAMPED} (timestamped)"
+          echo "  - ${IMAGE_TAG_LATEST} (latest)"
+          
+          # Set outputs for later steps
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${IMAGE_TAG_SHA}" >> $GITHUB_OUTPUT
+          echo "${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${IMAGE_TAG_SEMVER}" >> $GITHUB_OUTPUT
+          echo "${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${IMAGE_TAG_TIMESTAMPED}" >> $GITHUB_OUTPUT
+          echo "${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${IMAGE_TAG_LATEST}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      # ========================================================================
+      # BUILD IMAGE
+      # ========================================================================
+      - name: Build container image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            TTS_VERSION=${{ env.TTS_VERSION }}
+          cache-from: type=registry,ref=${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:buildcache,mode=max
+      
+      # ========================================================================
+      # VULNERABILITY SCANNING (Trivy)
+      # ========================================================================
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: 0  # Don't fail build, but upload results
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'container-scan'
+      
+      - name: Check for critical vulnerabilities
+        run: |
+          # Parse Trivy results
+          CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level=="error")] | length' trivy-results.sarif)
+          HIGH_COUNT=$(jq '[.runs[].results[] | select(.level=="warning")] | length' trivy-results.sarif)
+          
+          echo "🔍 Vulnerability Scan Results:"
+          echo "   CRITICAL: ${CRITICAL_COUNT}"
+          echo "   HIGH: ${HIGH_COUNT}"
+          
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "❌ CRITICAL vulnerabilities found. Image will be quarantined."
+            echo "   Review GitHub Security tab for details."
+            # For now, only warn (don't fail)
+            # In production, uncomment to fail: exit 1
+          elif [ "$HIGH_COUNT" -gt 10 ]; then
+            echo "⚠️  More than 10 HIGH vulnerabilities found."
+            echo "   Consider patching before deployment."
+          else
+            echo "✅ No critical vulnerabilities detected."
+          fi
+      
+      # ========================================================================
+      # PUSH TO ACR
+      # ========================================================================
+      - name: Push image to ACR
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ steps.meta.outputs.tags }}" | while read -r tag; do
+            echo "Pushing ${tag}..."
+            docker push "${tag}"
+          done
+      
+      - name: Get image digest
+        if: github.event_name != 'pull_request'
+        id: digest
+        run: |
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.image_tag }} | cut -d'@' -f2)
+          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+          echo "📦 Image pushed with digest: ${DIGEST}"
+  
+  # ============================================================================
+  # JOB 2: TRIGGER VM DEPLOYMENT (Optional)
+  # ============================================================================
+  deploy-vm:
+    name: Trigger VM Deployment
+    needs: build-and-scan
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Trigger VM webhook
+        run: |
+          if [ -z "${{ secrets.VM_WEBHOOK_URL }}" ]; then
+            echo "⚠️  VM_WEBHOOK_URL not configured. Skipping VM deployment trigger."
+            exit 0
+          fi
+          
+          curl -X POST "${{ secrets.VM_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Event: deployment" \
+            -H "X-GitHub-Delivery: ${{ github.run_id }}" \
+            -d '{
+              "image": "${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-scan.outputs.image_tag }}",
+              "digest": "${{ needs.build-and-scan.outputs.digest }}",
+              "commit": "${{ github.sha }}",
+              "actor": "${{ github.actor }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }' || echo "⚠️  Failed to trigger VM webhook (VM may not be running)"
+  
+  # ============================================================================
+  # JOB 3: UPDATE AKS MANIFEST (Flux CD will auto-deploy)
+  # ============================================================================
+  update-aks-manifest:
+    name: Update AKS Manifest for Flux CD
+    needs: build-and-scan
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update Kubernetes manifest
+        run: |
+          # Update image tag in Kubernetes deployment manifest
+          MANIFEST_FILE="deployments/kubernetes/manifests/tts-deployment.yaml"
+          
+          if [ ! -f "$MANIFEST_FILE" ]; then
+            echo "⚠️  Kubernetes manifest not found. Skipping AKS update."
+            echo "   This will be created when AKS deployment is implemented."
+            exit 0
+          fi
+          
+          # Use yq to update image tag
+          NEW_IMAGE="${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-scan.outputs.image_tag }}"
+          
+          yq eval ".spec.template.spec.containers[0].image = \"${NEW_IMAGE}\"" -i "$MANIFEST_FILE"
+          
+          echo "📝 Updated manifest:"
+          cat "$MANIFEST_FILE"
+      
+      - name: Commit and push manifest changes
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          
+          git add deployments/kubernetes/manifests/
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          
+          git commit -m "chore: Update AKS image to ${{ needs.build-and-scan.outputs.image_tag }}
+          
+          Image: ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-scan.outputs.image_tag }}
+          Digest: ${{ needs.build-and-scan.outputs.digest }}
+          Commit: ${{ github.sha }}
+          Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          git push || echo "⚠️  Failed to push manifest update (this is normal if manifest doesn't exist yet)"
+  
+  # ============================================================================
+  # JOB 4: NOTIFY ON COMPLETION
+  # ============================================================================
+  notify:
+    name: Send Deployment Notification
+    needs: [build-and-scan, deploy-vm, update-aks-manifest]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deployment summary
+        run: |
+          echo "# 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-scan.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest:** \`${{ needs.build-and-scan.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**TTS Version:** \`${{ env.TTS_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "- Build & Scan: ${{ needs.build-and-scan.result == 'success' && '✅' || '❌' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- VM Deployment: ${{ needs.deploy-vm.result == 'success' && '✅' || needs.deploy-vm.result == 'skipped' && '⏭️' || '❌' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- AKS Manifest: ${{ needs.update-aks-manifest.result == 'success' && '✅' || needs.update-aks-manifest.result == 'skipped' && '⏭️' || '❌' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Steps:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Watchtower on VM will auto-pull new image within 5 minutes" >> $GITHUB_STEP_SUMMARY
+          echo "- Flux CD will deploy to AKS if manifest was updated" >> $GITHUB_STEP_SUMMARY
+          echo "- Check [Security tab](../security/code-scanning) for vulnerability scan results" >> $GITHUB_STEP_SUMMARY

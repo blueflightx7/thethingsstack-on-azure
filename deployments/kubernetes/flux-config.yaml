@@ -1,0 +1,163 @@
+# ============================================================================
+# Flux CD Configuration for AKS Automated Deployments
+# GitOps-based continuous deployment with image automation
+# ============================================================================
+
+---
+# Source: GitHub Repository
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: tts-gitops
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/blueflightx7/thethingsstack-on-azure
+  ref:
+    branch: main
+  secretRef:
+    name: github-credentials  # Optional: for private repos
+
+---
+# Image Repository: Monitor ACR for new TTS images
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: tts-image
+  namespace: flux-system
+spec:
+  image: ${ACR_NAME}.azurecr.io/thethingsstack  # Replace ${ACR_NAME} with actual ACR name
+  interval: 5m  # Check for new images every 5 minutes
+  secretRef:
+    name: acr-credentials  # ACR pull secret
+
+---
+# Image Policy: Define which images to deploy (semver strategy)
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: tts-semver-policy
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: tts-image
+  policy:
+    semver:
+      range: '>=3.30.0 <4.0.0'  # Only deploy TTS 3.x versions
+  filterTags:
+    pattern: '^v(?P<version>.*)$'  # Match tags like v3.30.2
+    extract: '$version'
+
+---
+# Image Update Automation: Auto-update manifests on new image
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageUpdateAutomation
+metadata:
+  name: tts-image-automation
+  namespace: flux-system
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: tts-gitops
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: flux@thethingsstack.io
+        name: Flux CD Bot
+      messageTemplate: |
+        chore: Update TTS image to {{range .Updated.Images}}{{println .}}{{end}}
+        
+        Automation: flux-cd
+        Files updated: {{range $filename, $_ := .Updated.Files}}{{println $filename}}{{end}}
+    push:
+      branch: main
+  update:
+    path: ./deployments/kubernetes/manifests
+    strategy: Setters  # Use yq-style setters
+
+---
+# Kustomization: Apply manifests from Git
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: tts-deployment
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./deployments/kubernetes/manifests
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: tts-gitops
+  targetNamespace: tts
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: lorawan-stack
+      namespace: tts
+  timeout: 5m
+  wait: true
+
+---
+# ACR Pull Secret (created by deployment script)
+# This is a placeholder - actual secret created via:
+# kubectl create secret docker-registry acr-credentials \
+#   --docker-server=${ACR_NAME}.azurecr.io \
+#   --docker-username=<managed-identity-client-id> \
+#   --docker-password=<access-token> \
+#   --namespace=flux-system
+
+---
+# GitHub Credentials (optional, for private repos)
+# kubectl create secret generic github-credentials \
+#   --from-literal=username=<github-username> \
+#   --from-literal=password=<github-pat> \
+#   --namespace=flux-system
+
+# ============================================================================
+# DEPLOYMENT INSTRUCTIONS
+# ============================================================================
+# 1. Install Flux CD on AKS:
+#    az k8s-extension create \
+#      --cluster-name <aks-cluster> \
+#      --resource-group <rg> \
+#      --cluster-type managedClusters \
+#      --extension-type microsoft.flux \
+#      --name flux
+#
+# 2. Create ACR pull secret using managed identity:
+#    az aks update -n <aks-cluster> -g <rg> --attach-acr <acr-name>
+#
+# 3. Apply Flux configuration:
+#    kubectl apply -f flux-config.yaml
+#
+# 4. Verify Flux is watching:
+#    flux get images all
+#    flux get image policy
+#    flux logs
+#
+# BEHAVIOR:
+# - Flux checks ACR every 5 minutes for new images
+# - Only deploys images matching semver policy (v3.30.0 - v3.99.99)
+# - Updates Git manifest with new image tag
+# - Git commit triggers Kustomization reconciliation
+# - Kubernetes performs rolling update (blue-green, zero downtime)
+# - Health checks ensure new pods ready before terminating old
+#
+# ROLLBACK:
+# Option 1: Git revert
+#   git revert <commit-sha>
+#   git push
+#   (Flux auto-deploys previous version)
+#
+# Option 2: Kubernetes rollback
+#   kubectl rollout undo deployment/lorawan-stack -n tts
+#
+# Option 3: Suspend automation
+#   flux suspend image update tts-image-automation
+#   (Manually deploy specific version)
+# ============================================================================

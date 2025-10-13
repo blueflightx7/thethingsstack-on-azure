@@ -136,7 +136,9 @@ You will see an interactive menu:
 .\deploy.ps1 -Mode quick -AdminEmail "your-email@example.com"
 
 # Or use the simple deployment script
-.\deploy-simple.ps1 -AdminEmail "your-email@example.com"
+```powershell
+.\deployments\vm\deploy-simple.ps1 -AdminEmail "your-email@example.com"
+```
 ```
 
 **Bash** (Linux/macOS):
@@ -197,7 +199,9 @@ Create `parameters.json` for repeatable deployments:
 Deploy:
 ```powershell
 # VM deployment with parameters file
-.\deploy-simple.ps1 -ParametersFile "parameters.json"
+```powershell
+.\deployments\vm\deploy-simple.ps1 -ParametersFile "parameters.json"
+```
 
 # AKS deployment with parameters file
 .\deployments\kubernetes\deploy-aks.ps1 -ParametersFile "parameters.json"
@@ -305,7 +309,7 @@ After deployment completes (~10 minutes):
 | Method | Description | Best For | Monthly Cost |
 |--------|-------------|----------|--------------|
 | **Interactive Menu** | `.\deploy.ps1` (no parameters) | First-time users, flexibility | Varies |
-| **Quick VM** | `.\deploy.ps1 -Mode quick` or `.\deploy-simple.ps1` | Development, testing, PoC | ~$155-205 |
+| **Quick VM** | `.\deploy.ps1 -Mode quick` or `.\deployments\vm\deploy-simple.ps1` | Development, testing, PoC | ~$155-205 |
 | **Production AKS** | `.\deploy.ps1 -Mode aks` | Production scale, HA, 100K+ devices | ~$500-800 |
 | **Advanced VM** | `.\deploy.ps1 -Mode vm` | Custom configuration, specific sizing | ~$200-400 |
 
@@ -314,7 +318,7 @@ After deployment completes (~10 minutes):
 | Script | Platform | Description |
 |--------|----------|-------------|
 | **`deploy.ps1`** | PowerShell | 🌟 **PRIMARY** - Menu-driven orchestrator for all deployment modes |
-| **`deploy-simple.ps1`** | PowerShell | Quick VM deployment (called by deploy.ps1 -Mode quick) |
+| **`deployments/vm/deploy-simple.ps1`** | PowerShell | Quick VM deployment (called by deploy.ps1 -Mode quick) |
 | **`deployments/kubernetes/deploy-aks.ps1`** | PowerShell | AKS production deployment (called by deploy.ps1 -Mode aks) |
 | **`deploy.sh`** | Bash | Linux/macOS VM deployments |
 
@@ -1340,7 +1344,7 @@ Before going to production, ensure:
 
 ```bash
 # Deploy
-.\deploy-simple.ps1 -AdminEmail "you@example.com"
+.\deployments\vm\deploy-simple.ps1 -AdminEmail "you@example.com"
 
 # Check status
 ssh {user}@{ip} "docker ps"

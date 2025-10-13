@@ -7,62 +7,49 @@
 param location string = resourceGroup().location
 
 @description('Environment name for resource naming')
-param environmentName string = 'tts-aks-prod'
-
-@description('AKS cluster name')
-param aksClusterName string = '${environmentName}-aks'
-
-@description('Number of nodes in the default node pool')
-@minValue(1)
-@maxValue(100)
-param nodeCount int = 3
-
-@description('VM size for cluster nodes')
-param nodeSize string = 'Standard_D4s_v3'
-
-@description('Kubernetes version')
-param kubernetesVersion string = '1.28'
+param environmentName string
 
 @description('Admin email for certificates and notifications')
 param adminEmail string
 
 @description('Database admin password')
 @secure()
-param dbAdminPassword string
+param databasePassword string
 
 @description('TTS admin password for console access')
 @secure()
 param ttsAdminPassword string
 
-@description('Key Vault name for secrets management')
-param keyVaultName string
+@description('Cookie hash key (64 hex characters)')
+@secure()
+param cookieHashKey string
 
-@description('Azure Container Registry name')
-param acrName string
+@description('Cookie block key (64 hex characters)')
+@secure()
+param cookieBlockKey string
 
-@description('Enable Azure Monitor for containers')
-param enableMonitoring bool = true
+@description('Cluster keys (base64-encoded)')
+@secure()
+param clusterKeys string
 
-@description('Enable auto-scaling')
-param enableAutoScaling bool = true
-
-@description('Minimum node count for auto-scaling')
-param minNodeCount int = 2
-
-@description('Maximum node count for auto-scaling')
-param maxNodeCount int = 10
+@description('Use Azure Cache for Redis Enterprise instead of in-cluster')
+param useRedisEnterprise bool = true
 
 // ============================================================================
 // VARIABLES
 // ============================================================================
 
+var aksClusterName = '${environmentName}-aks'
 var vnetName = '${environmentName}-vnet'
 var aksSubnetName = 'aks-subnet'
 var dbSubnetName = 'db-subnet'
 var nsgName = '${environmentName}-nsg'
 var dbServerName = '${environmentName}-db-${uniqueString(resourceGroup().id)}'
+var keyVaultName = '${environmentName}-kv'
+var redisName = '${environmentName}-redis'
+var acrName = '${environmentName}${uniqueString(resourceGroup().id)}'
+var workloadIdentityName = 'id-tts-${environmentName}'
 var logAnalyticsName = '${environmentName}-logs'
-var appInsightsName = '${environmentName}-appinsights'
 
 // ============================================================================
 // LOG ANALYTICS WORKSPACE
@@ -76,16 +63,6 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
       name: 'PerGB2018'
     }
     retentionInDays: 30
-  }
-}
-
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
-  name: appInsightsName
-  location: location
-  kind: 'web'
-  properties: {
-    Application_Type: 'web'
-    WorkspaceResourceId: logAnalytics.id
   }
 }
 
@@ -216,57 +193,59 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
 }
 
 // ============================================================================
-// AKS CLUSTER
+// AKS CLUSTER (AUTOMATIC MODE)
 // ============================================================================
 
-resource aks 'Microsoft.ContainerService/managedClusters@2023-10-01' = {
+resource aks 'Microsoft.ContainerService/managedClusters@2024-05-02-preview' = {
   name: aksClusterName
   location: location
+  sku: {
+    name: 'Automatic'
+    tier: 'Standard'
+  }
   identity: {
     type: 'SystemAssigned'
   }
   properties: {
-    kubernetesVersion: kubernetesVersion
     dnsPrefix: aksClusterName
     enableRBAC: true
-    agentPoolProfiles: [
-      {
-        name: 'nodepool1'
-        count: nodeCount
-        vmSize: nodeSize
-        osType: 'Linux'
-        mode: 'System'
-        enableAutoScaling: enableAutoScaling
-        minCount: enableAutoScaling ? minNodeCount : null
-        maxCount: enableAutoScaling ? maxNodeCount : null
-        vnetSubnetID: vnet.properties.subnets[0].id
-        maxPods: 110
-        type: 'VirtualMachineScaleSets'
-        availabilityZones: [
-          '1'
-          '2'
-          '3'
-        ]
+    oidcIssuerProfile: {
+      enabled: true
+    }
+    securityProfile: {
+      workloadIdentity: {
+        enabled: true
       }
-    ]
+    }
+    nodeProvisioningProfile: {
+      mode: 'Auto'
+    }
     networkProfile: {
       networkPlugin: 'azure'
+      networkDataplane: 'azure'
       networkPolicy: 'azure'
       serviceCidr: '10.1.0.0/16'
       dnsServiceIP: '10.1.0.10'
-      loadBalancerSku: 'Standard'
+      loadBalancerSku: 'standard'
     }
-    addonProfiles: enableMonitoring ? {
+    ingressProfile: {
+      webAppRouting: {
+        enabled: true
+      }
+    }
+    azureMonitorProfile: {
+      metrics: {
+        enabled: true
+      }
+    }
+    addonProfiles: {
       omsagent: {
         enabled: true
         config: {
           logAnalyticsWorkspaceResourceID: logAnalytics.id
         }
       }
-      azurePolicy: {
-        enabled: true
-      }
-    } : {}
+    }
   }
 }
 
@@ -295,7 +274,7 @@ resource dbServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview'
   properties: {
     version: '15'
     administratorLogin: 'ttsadmin'
-    administratorLoginPassword: dbAdminPassword
+    administratorLoginPassword: databasePassword
     storage: {
       storageSizeGB: 128
       autoGrow: 'Enabled'
@@ -384,7 +363,7 @@ resource dbPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
   name: 'db-password'
   properties: {
-    value: dbAdminPassword
+    value: databasePassword
   }
 }
 
@@ -404,6 +383,138 @@ resource adminEmailSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
+resource cookieHashKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'cookie-hash-key'
+  properties: {
+    value: cookieHashKey
+  }
+}
+
+resource cookieBlockKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'cookie-block-key'
+  properties: {
+    value: cookieBlockKey
+  }
+}
+
+resource clusterKeysSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'cluster-keys'
+  properties: {
+    value: clusterKeys
+  }
+}
+
+// ============================================================================
+// STORAGE ACCOUNT
+// ============================================================================
+
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: 'sttts${take(uniqueString(resourceGroup().id), 18)}'
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  properties: {
+    accessTier: 'Hot'
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+    supportsHttpsTrafficOnly: true
+  }
+}
+
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
+  parent: storageAccount
+  name: 'default'
+}
+
+var containerNames = ['avatars', 'pictures', 'uploads']
+resource containers 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = [for name in containerNames: {
+  parent: blobService
+  name: name
+  properties: {
+    publicAccess: 'None'
+  }
+}]
+
+// ============================================================================
+// WORKLOAD IDENTITY
+// ============================================================================
+
+resource workloadIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: workloadIdentityName
+  location: location
+}
+
+resource federatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  parent: workloadIdentity
+  name: 'tts-workload-id'
+  properties: {
+    audiences: ['api://AzureADTokenExchange']
+    issuer: aks.properties.oidcIssuerProfile.issuerURL
+    subject: 'system:serviceaccount:tts:tts'
+  }
+}
+
+// Role assignments for Workload Identity
+resource storageRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: storageAccount
+  name: guid(storageAccount.id, workloadIdentity.id, 'StorageBlobDataContributor')
+  properties: {
+    principalId: workloadIdentity.properties.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource kvSecretsUserRoleWorkload 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: keyVault
+  name: guid(keyVault.id, workloadIdentity.id, 'KeyVaultSecretsUser')
+  properties: {
+    principalId: workloadIdentity.properties.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// ============================================================================
+// REDIS ENTERPRISE (CONDITIONAL)
+// ============================================================================
+
+resource redisEnterprise 'Microsoft.Cache/redisEnterprise@2023-11-01' = if (useRedisEnterprise) {
+  name: redisName
+  location: location
+  sku: {
+    name: 'Enterprise_E10'
+    capacity: 2
+  }
+  zones: ['1', '2', '3']
+  properties: {
+    minimumTlsVersion: '1.2'
+  }
+}
+
+resource redisDatabase 'Microsoft.Cache/redisEnterprise/databases@2023-11-01' = if (useRedisEnterprise) {
+  parent: redisEnterprise
+  name: 'default'
+  properties: {
+    clusteringPolicy: 'OSSCluster'
+    evictionPolicy: 'NoEviction'
+    port: 10000
+  }
+}
+
+resource redisPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (useRedisEnterprise) {
+  parent: keyVault
+  name: 'redis-password'
+  properties: {
+    value: listKeys(resourceId('Microsoft.Cache/redisEnterprise/databases', redisName, 'default'), '2023-11-01').primaryKey
+  }
+}
+
 // ============================================================================
 // OUTPUTS
 // ============================================================================
@@ -416,31 +527,27 @@ output aksNodeResourceGroup string = aks.properties.nodeResourceGroup
 output acrName string = acr.name
 output acrLoginServer string = acr.properties.loginServer
 
-output databaseHost string = dbServer.properties.fullyQualifiedDomainName
+output postgresHost string = dbServer.properties.fullyQualifiedDomainName
 output databaseName string = ttsDatabase.name
 
 output keyVaultName string = keyVault.name
 output keyVaultUri string = keyVault.properties.vaultUri
 
+output storageAccountName string = storageAccount.name
+output workloadIdentityClientId string = workloadIdentity.properties.clientId
+output tenantId string = subscription().tenantId
+
+output redisHost string = useRedisEnterprise ? '${reference(resourceId('Microsoft.Cache/redisEnterprise', redisName), '2023-11-01').hostName}:10000' : ''
+
 output logAnalyticsWorkspaceId string = logAnalytics.id
-output applicationInsightsConnectionString string = appInsights.properties.ConnectionString
 
 output vnetId string = vnet.id
 output aksSubnetId string = vnet.properties.subnets[0].id
 
-output clusterInfo object = {
-  name: aks.name
-  resourceId: aks.id
-  fqdn: aks.properties.fqdn
-  kubernetesVersion: aks.properties.kubernetesVersion
-  nodeCount: nodeCount
-  nodeSize: nodeSize
-}
-
 output nextSteps array = [
-  'Configure kubectl: az aks get-credentials -g ${resourceGroup().name} -n ${aks.name}'
-  'Deploy TTS Helm chart: helm install tts ./charts/thethingsstack'
-  'Configure ingress controller with TLS'
-  'Set up DNS for your domain'
-  'Configure monitoring and alerts'
+  'Get kubectl credentials: az aks get-credentials -g ${resourceGroup().name} -n ${aks.name}'
+  'Install cert-manager: kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml'
+  'Deploy TTS Helm chart: helm upgrade --install tts oci://registry-1.docker.io/thethingsindustries/lorawan-stack-helm-chart --version 3.30.2 -n tts'
+  'Create DNS A record pointing to ingress IP'
+  'Configure monitoring and alerts in Azure Monitor'
 ]

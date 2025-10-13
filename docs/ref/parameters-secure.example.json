@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "Central US"
+    },
+    "environmentName": {
+      "value": "tts-secure"
+    },
+    "adminUsername": {
+      "value": "ttsadmin"
+    },
+    "adminPassword": {
+      "value": ""
+    },
+    "adminSourceIP": {
+      "value": "AUTO_DETECTED"
+    },
+    "sshPublicKey": {
+      "value": ""
+    },
+    "enablePrivateDatabaseAccess": {
+      "value": true
+    },
+    "enableKeyVault": {
+      "value": true
+    },
+    "vmSize": {
+      "value": "Standard_B4ms"
+    },
+    "domainName": {
+      "value": ""
+    },
+    "adminEmail": {
+      "value": "admin@yourdomain.com"
+    },
+    "ttsAdminPasswordParam": {
+      "value": ""
+    },
+    "cookieHashKeyParam": {
+      "value": ""
+    },
+    "cookieBlockKeyParam": {
+      "value": ""
+    },
+    "oauthClientSecret": {
+      "value": ""
+    }
+  }
+}

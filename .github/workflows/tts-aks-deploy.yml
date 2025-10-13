@@ -1,0 +1,275 @@
+name: Deploy TTS to AKS
+
+on:
+  push:
+    branches:
+      - master
+      - azure-update-aks
+    paths:
+      - 'deployments/kubernetes/**'
+      - '.github/workflows/tts-aks-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+      useRedisEnterprise:
+        description: 'Use Azure Cache for Redis Enterprise'
+        required: true
+        default: 'true'
+        type: boolean
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ENVIRONMENT_NAME: ${{ inputs.environment || 'tts-prod' }}
+  LOCATION: 'centralus'
+  DOMAIN_NAME: ${{ secrets.TTS_DOMAIN }}
+  ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+  USE_REDIS_ENTERPRISE: ${{ inputs.useRedisEnterprise || 'true' }}
+
+jobs:
+  validate:
+    name: Validate Infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Install Bicep CLI
+        run: |
+          az bicep version
+          az bicep upgrade
+      
+      - name: Build Bicep Template
+        run: |
+          az bicep build --file deployments/kubernetes/tts-aks-deployment.bicep
+      
+      - name: Validate Deployment
+        run: |
+          az deployment group validate \
+            --resource-group rg-${{ env.ENVIRONMENT_NAME }} \
+            --template-file deployments/kubernetes/tts-aks-deployment.bicep \
+            --parameters \
+              environmentName=${{ env.ENVIRONMENT_NAME }} \
+              location=${{ env.LOCATION }} \
+              adminEmail=${{ env.ADMIN_EMAIL }} \
+              databasePassword=${{ secrets.DB_PASSWORD }} \
+              ttsAdminPassword=${{ secrets.TTS_ADMIN_PASSWORD }} \
+              cookieHashKey=${{ secrets.COOKIE_HASH_KEY }} \
+              cookieBlockKey=${{ secrets.COOKIE_BLOCK_KEY }} \
+              clusterKeys=${{ secrets.CLUSTER_KEYS }} \
+              useRedisEnterprise=${{ env.USE_REDIS_ENTERPRISE }}
+
+  deploy:
+    name: Deploy to Azure
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    environment:
+      name: ${{ inputs.environment || 'production' }}
+      url: https://${{ secrets.TTS_DOMAIN }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Create Resource Group
+        run: |
+          az group create \
+            --name rg-${{ env.ENVIRONMENT_NAME }} \
+            --location ${{ env.LOCATION }}
+      
+      - name: Deploy Bicep Infrastructure
+        id: deploy_infra
+        run: |
+          az deployment group create \
+            --resource-group rg-${{ env.ENVIRONMENT_NAME }} \
+            --template-file deployments/kubernetes/tts-aks-deployment.bicep \
+            --parameters \
+              environmentName=${{ env.ENVIRONMENT_NAME }} \
+              location=${{ env.LOCATION }} \
+              adminEmail=${{ env.ADMIN_EMAIL }} \
+              databasePassword=${{ secrets.DB_PASSWORD }} \
+              ttsAdminPassword=${{ secrets.TTS_ADMIN_PASSWORD }} \
+              cookieHashKey=${{ secrets.COOKIE_HASH_KEY }} \
+              cookieBlockKey=${{ secrets.COOKIE_BLOCK_KEY }} \
+              clusterKeys=${{ secrets.CLUSTER_KEYS }} \
+              useRedisEnterprise=${{ env.USE_REDIS_ENTERPRISE }} \
+            --output json > deployment-output.json
+          
+          cat deployment-output.json
+          
+          # Export outputs for later steps
+          echo "AKS_CLUSTER_NAME=$(jq -r '.properties.outputs.aksClusterName.value' deployment-output.json)" >> $GITHUB_ENV
+          echo "KEY_VAULT_NAME=$(jq -r '.properties.outputs.keyVaultName.value' deployment-output.json)" >> $GITHUB_ENV
+          echo "POSTGRES_HOST=$(jq -r '.properties.outputs.postgresHost.value' deployment-output.json)" >> $GITHUB_ENV
+          echo "STORAGE_ACCOUNT_NAME=$(jq -r '.properties.outputs.storageAccountName.value' deployment-output.json)" >> $GITHUB_ENV
+          echo "WORKLOAD_IDENTITY_CLIENT_ID=$(jq -r '.properties.outputs.workloadIdentityClientId.value' deployment-output.json)" >> $GITHUB_ENV
+          echo "TENANT_ID=$(jq -r '.properties.outputs.tenantId.value' deployment-output.json)" >> $GITHUB_ENV
+          echo "REDIS_HOST=$(jq -r '.properties.outputs.redisHost.value' deployment-output.json)" >> $GITHUB_ENV
+      
+      - name: Get AKS Credentials
+        run: |
+          az aks get-credentials \
+            --resource-group rg-${{ env.ENVIRONMENT_NAME }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
+      
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.13.0'
+      
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+          kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
+          kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
+      
+      - name: Create Let's Encrypt ClusterIssuer
+        run: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: letsencrypt-prod
+          spec:
+            acme:
+              server: https://acme-v02.api.letsencrypt.org/directory
+              email: ${{ env.ADMIN_EMAIL }}
+              privateKeySecretRef:
+                name: letsencrypt-prod
+              solvers:
+              - http01:
+                  ingress:
+                    class: webapprouting.kubernetes.azure.com
+          EOF
+      
+      - name: Prepare Helm Values
+        run: |
+          # Get secrets from Key Vault
+          DB_PASS=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT_NAME }} --name db-password --query value -o tsv)
+          TTS_ADMIN_PASS=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT_NAME }} --name tts-admin-password --query value -o tsv)
+          COOKIE_HASH=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT_NAME }} --name cookie-hash-key --query value -o tsv)
+          COOKIE_BLOCK=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT_NAME }} --name cookie-block-key --query value -o tsv)
+          CLUSTER_KEYS=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT_NAME }} --name cluster-keys --query value -o tsv)
+          
+          if [ "${{ env.USE_REDIS_ENTERPRISE }}" == "true" ]; then
+            REDIS_PASSWORD=$(az keyvault secret show --vault-name ${{ env.KEY_VAULT_NAME }} --name redis-password --query value -o tsv)
+            REDIS_ADDR="${{ env.REDIS_HOST }}"
+          else
+            REDIS_PASSWORD=""
+            REDIS_ADDR="redis-0.redis.tts.svc.cluster.local:6379"
+          fi
+          
+          # Create deployment values file
+          cat > deployment-values.yaml <<EOF
+          global:
+            domain: "${{ env.DOMAIN_NAME }}"
+            deployment:
+              initialTenant:
+                adminPassword: "$TTS_ADMIN_PASS"
+                adminEmail: "${{ env.ADMIN_EMAIL }}"
+            blob:
+              azure:
+                accountName: "${{ env.STORAGE_ACCOUNT_NAME }}"
+                clientID: "${{ env.WORKLOAD_IDENTITY_CLIENT_ID }}"
+            cluster:
+              keys: "$CLUSTER_KEYS"
+            http:
+              cookie:
+                blockKey: "$COOKIE_BLOCK"
+                hashKey: "$COOKIE_HASH"
+            redis:
+              address: "$REDIS_ADDR"
+              password: "$REDIS_PASSWORD"
+          
+          is:
+            database:
+              uri: "postgres://ttsadmin:$DB_PASS@${{ env.POSTGRES_HOST }}/tts?sslmode=require"
+          
+          workloadIdentity:
+            clientId: "${{ env.WORKLOAD_IDENTITY_CLIENT_ID }}"
+            tenantId: "${{ env.TENANT_ID }}"
+          
+          gateway:
+            udp:
+              annotations:
+                service.beta.kubernetes.io/azure-load-balancer-resource-group: "rg-${{ env.ENVIRONMENT_NAME }}"
+          EOF
+      
+      - name: Deploy The Things Stack
+        run: |
+          helm upgrade --install tts \
+            oci://registry-1.docker.io/thethingsindustries/lorawan-stack-helm-chart \
+            --version 3.30.2 \
+            --namespace tts \
+            --create-namespace \
+            --values deployments/kubernetes/values-azure-aks.yaml \
+            --values deployment-values.yaml \
+            --wait \
+            --timeout 15m
+      
+      - name: Get Deployment Details
+        id: deployment_details
+        run: |
+          echo "Waiting for ingress IP..."
+          sleep 30
+          
+          INGRESS_IP=$(kubectl get ingress -n tts -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+          GATEWAY_IP=$(kubectl get svc -n tts -l app=lorawan-stack,component=gateway-server -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+          
+          echo "ingress_ip=$INGRESS_IP" >> $GITHUB_OUTPUT
+          echo "gateway_ip=$GATEWAY_IP" >> $GITHUB_OUTPUT
+          
+          echo "========================================"
+          echo "Deployment Complete!"
+          echo "========================================"
+          echo "Console URL: https://${{ env.DOMAIN_NAME }}"
+          echo "Ingress IP: $INGRESS_IP"
+          echo "Gateway UDP: $GATEWAY_IP:1700"
+          echo "========================================"
+          echo "Next Steps:"
+          echo "1. Create DNS A record: ${{ env.DOMAIN_NAME }} → $INGRESS_IP"
+          echo "2. Wait for TLS certificate: kubectl get certificate -n tts"
+          echo "3. Configure gateways to use: $GATEWAY_IP:1700"
+          echo "========================================"
+      
+      - name: Create Deployment Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          # ✅ Deployment Successful
+          
+          ## Access Information
+          
+          - **Console URL**: https://${{ env.DOMAIN_NAME }}
+          - **Ingress IP**: ${{ steps.deployment_details.outputs.ingress_ip }}
+          - **Gateway UDP**: ${{ steps.deployment_details.outputs.gateway_ip }}:1700
+          
+          ## Next Steps
+          
+          1. Create DNS A record: \`${{ env.DOMAIN_NAME }} → ${{ steps.deployment_details.outputs.ingress_ip }}\`
+          2. Wait for TLS certificate: \`kubectl get certificate -n tts\`
+          3. Configure LoRaWAN gateways to use: \`${{ steps.deployment_details.outputs.gateway_ip }}:1700\`
+          4. View logs: \`kubectl logs -n tts -l app=lorawan-stack -f\`
+          
+          ## Monitoring
+          
+          - Grafana: Check Azure Monitor Workspace
+          - Logs: Container Insights in Azure Portal
+          EOF

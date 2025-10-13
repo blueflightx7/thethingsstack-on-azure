@@ -1,0 +1,74 @@
+# ============================================================================
+# Watchtower Configuration for Auto-Updates
+# Add this to your docker-compose.yml for automatic image updates from ACR
+# ============================================================================
+
+services:
+  # Watchtower - Automatic container updates
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: tts-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json:ro  # ACR credentials via managed identity
+    environment:
+      # Polling interval (300 = 5 minutes)
+      - WATCHTOWER_POLL_INTERVAL=300
+      
+      # Clean up old images after update
+      - WATCHTOWER_CLEANUP=true
+      
+      # Include containers that are currently restarting
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+      
+      # Rolling restart (stop old, start new)
+      - WATCHTOWER_ROLLING_RESTART=true
+      
+      # Only monitor specific containers (optional)
+      # - WATCHTOWER_SCOPE=lorawan-stack
+      
+      # Enable notifications (optional - configure webhook)
+      # - WATCHTOWER_NOTIFICATION_URL=https://your-webhook-url
+      # - WATCHTOWER_NOTIFICATIONS=shoutrrr
+      
+      # Log level
+      - WATCHTOWER_LOG_LEVEL=info
+      
+      # Monitor only (dry run - set to true for testing)
+      - WATCHTOWER_MONITOR_ONLY=false
+      
+      # Schedule (cron format - optional, overrides POLL_INTERVAL)
+      # - WATCHTOWER_SCHEDULE=0 */5 * * * *  # Every 5 minutes
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"  # Don't update watchtower itself
+
+# ============================================================================
+# USAGE INSTRUCTIONS
+# ============================================================================
+# 1. Ensure VM has managed identity with AcrPull role
+# 2. Login to ACR using managed identity:
+#    az acr login --name <acr-name> --identity
+# 3. Add this service to your docker-compose.yml
+# 4. Restart: docker-compose up -d
+# 5. Check logs: docker logs tts-watchtower -f
+#
+# BEHAVIOR:
+# - Watchtower checks ACR every 5 minutes for new images
+# - If new image detected (by digest, not tag), pulls it
+# - Stops old container gracefully
+# - Starts new container with same configuration
+# - Removes old image to save disk space
+#
+# ZERO-DOWNTIME UPDATES:
+# - The Things Stack handles graceful shutdown
+# - Existing LoRaWAN connections maintained
+# - New connections route to new container
+#
+# ROLLBACK:
+# If update breaks something:
+#   docker-compose down
+#   docker pull <acr>.azurecr.io/thethingsstack:<old-tag>
+#   docker tag <acr>.azurecr.io/thethingsstack:<old-tag> <acr>.azurecr.io/thethingsstack:latest
+#   docker-compose up -d
+# ============================================================================
