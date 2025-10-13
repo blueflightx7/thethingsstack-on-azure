@@ -13,20 +13,23 @@
 
 ## 📑 Table of Contents
 
-- [Overview](#-overview)
-- [Quick Start](#-quick-start)
-- [Architecture](#-architecture)
-- [Deployment Options](#-deployment-options)
-- [What Gets Deployed](#-what-gets-deployed)
-- [Security Features](#-security-features)
-- [Post-Deployment](#-post-deployment)
-- [Operations Guide](#-operations-guide)
-- [Monitoring & Alerts](#-monitoring--alerts)
-- [Cost Estimation](#-cost-estimation)
-- [Troubleshooting](#-troubleshooting)
-- [Documentation](#-documentation)
-- [Contributing](#-contributing)
-- [Support](#-support)
+- [🎯 Overview](#-overview)
+- [🚀 Quick Start](#-quick-start)
+- [🏗️ Architecture](#️-architecture)
+- [🔧 Deployment Options](#-deployment-options)
+- [📦 What Gets Deployed](#-what-gets-deployed)
+- [🛡️ Security Features](#️-security-features)
+- [🎉 Post-Deployment](#-post-deployment)
+- [📊 Operations Guide](#-operations-guide)
+- [📈 Monitoring & Alerts](#-monitoring--alerts)
+- [💰 Cost Estimation](#-cost-estimation)
+- [🐛 Troubleshooting](#-troubleshooting)
+- [📚 Documentation](#-documentation)
+- [🤝 Contributing](#-contributing)
+- [🆘 Support](#-support)
+- [⚖️ License](#️-license)
+- [⚠️ Important Notices](#️-important-notices)
+- [🎯 Quick Reference Card](#-quick-reference-card)
 
 ---
 
@@ -1166,10 +1169,10 @@ WHERE state = 'idle in transaction' AND now() - query_start > interval '10 minut
 |----------|-------------|-------|
 | **[README.md](README.md)** | ⭐ This file - Quick start and overview | 800+ |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | 🏗️ Comprehensive architecture guide (13 sections, 10+ diagrams) | 2,500+ |
-| **[DEPLOYMENT_FIXES_SUMMARY.md](DEPLOYMENT_FIXES_SUMMARY.md)** | 🔧 All 7 critical fixes applied to deployment | 319 |
-| **[SECURITY_HARDENING.md](SECURITY_HARDENING.md)** | 🔐 Production security checklist and best practices | 530 |
-| **[SECURITY_FIX_SUMMARY.md](SECURITY_FIX_SUMMARY.md)** | 🛡️ Security-specific fixes (#6 SSH, #7 password) | 250 |
-| **[LOGIN_FIX.md](LOGIN_FIX.md)** | 🔑 Admin password authentication fix details | 82 |
+| **[docs/DEPLOYMENT_FIXES_SUMMARY.md](docs/DEPLOYMENT_FIXES_SUMMARY.md)** | 🔧 All 7 critical fixes applied to deployment | 319 |
+| **[docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md)** | 🔐 Production security checklist and best practices | 530 |
+| **[docs/SECURITY_FIX_SUMMARY.md](docs/SECURITY_FIX_SUMMARY.md)** | 🛡️ Security-specific fixes (#6 SSH, #7 password) | 250 |
+| **[docs/LOGIN_FIX.md](docs/LOGIN_FIX.md)** | 🔑 Admin password authentication fix details | 82 |
 
 ### Documentation Map
 
@@ -1193,16 +1196,16 @@ WHERE state = 'idle in transaction' AND now() - query_start > interval '10 minut
 │  │             │                                              │
 │  │             └─► Specialized Docs:                         │
 │  │                  │                                         │
-│  │                  ├─► DEPLOYMENT_FIXES_SUMMARY.md          │
+│  │                  ├─► docs/DEPLOYMENT_FIXES_SUMMARY.md     │
 │  │                  │    (If deployment issues)              │
 │  │                  │                                         │
-│  │                  ├─► SECURITY_HARDENING.md                │
+│  │                  ├─► docs/SECURITY_HARDENING.md           │
 │  │                  │    (Production checklist)              │
 │  │                  │                                         │
-│  │                  ├─► SECURITY_FIX_SUMMARY.md              │
+│  │                  ├─► docs/SECURITY_FIX_SUMMARY.md         │
 │  │                  │    (SSH & password fixes)              │
 │  │                  │                                         │
-│  │                  └─► LOGIN_FIX.md                         │
+│  │                  └─► docs/LOGIN_FIX.md                    │
 │  │                       (Admin login issues)                │
 │  │                                                            │
 └─────────────────────────────────────────────────────────────┘
