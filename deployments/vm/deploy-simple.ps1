@@ -11,10 +11,15 @@
 # ==============================================================================
 
 param(
-    [string]$Location = "centralus",
+    [string]$Location = "",
     [string]$EnvironmentName = "tts-prod",
     [string]$AdminEmail = "",
-    [string]$DomainName = ""
+    [string]$DomainName = "",
+    [string]$ResourceGroupName = "",
+    [string]$VNetName = "",
+    [string]$SubnetName = "",
+    [bool]$UseCustomAcr = $false,
+    [string]$AcrName = ""
 )
 
 # Set error action preference
@@ -31,9 +36,38 @@ Write-Host "================================`n" -ForegroundColor Cyan
 
 Write-Host "STEP 1: Collecting Parameters`n" -ForegroundColor Yellow
 
+# Prompt for Azure region if not provided
+if ([string]::IsNullOrEmpty($Location)) {
+    Write-Host "`nAvailable Azure Regions (Popular):" -ForegroundColor Cyan
+    Write-Host "  1. centralus (Central US)" -ForegroundColor White
+    Write-Host "  2. eastus (East US)" -ForegroundColor White
+    Write-Host "  3. westus2 (West US 2)" -ForegroundColor White
+    Write-Host "  4. westeurope (West Europe)" -ForegroundColor White
+    Write-Host "  5. northeurope (North Europe)" -ForegroundColor White
+    Write-Host "  6. eastasia (East Asia)" -ForegroundColor White
+    Write-Host "  7. southeastasia (Southeast Asia)" -ForegroundColor White
+    Write-Host "  8. Custom (enter your own)`n" -ForegroundColor White
+    
+    $regionChoice = Read-Host "Select region (1-8, or press Enter for default: centralus)"
+    
+    switch ($regionChoice) {
+        "1" { $Location = "centralus" }
+        "2" { $Location = "eastus" }
+        "3" { $Location = "westus2" }
+        "4" { $Location = "westeurope" }
+        "5" { $Location = "northeurope" }
+        "6" { $Location = "eastasia" }
+        "7" { $Location = "southeastasia" }
+        "8" { $Location = Read-Host "Enter Azure region name" }
+        default { $Location = "centralus" }
+    }
+    
+    Write-Host "✓ Selected region: $Location" -ForegroundColor Green
+}
+
 # Prompt for admin email if not provided
 if ([string]::IsNullOrEmpty($AdminEmail)) {
-    $AdminEmail = Read-Host "Enter admin email address (for Let's Encrypt & TTS admin)"
+    $AdminEmail = Read-Host "`nEnter admin email address (for Let's Encrypt & TTS admin)"
 }
 
 # Validate email format
@@ -98,23 +132,194 @@ try {
 }
 
 # ============================================================================
-# STEP 2: CREATE RESOURCE GROUP
+# STEP 2: RESOURCE GROUP CONFIGURATION
 # ============================================================================
 
-Write-Host "`nSTEP 2: Creating Resource Group`n" -ForegroundColor Yellow
+Write-Host "`nSTEP 2: Resource Group Configuration`n" -ForegroundColor Yellow
 
-$timestamp = Get-Date -Format "yyyyMMddHHmm"
-$resourceGroupName = "rg-tts-$timestamp"
-
-Write-Host "Creating resource group: $resourceGroupName" -ForegroundColor Cyan
-New-AzResourceGroup -Name $resourceGroupName -Location $Location -Force | Out-Null
-Write-Host "✓ Resource group created" -ForegroundColor Green
+# Check if user wants to use existing resource group
+if ([string]::IsNullOrEmpty($ResourceGroupName)) {
+    $useExisting = Read-Host "Do you have an existing resource group to use? (y/N)"
+    
+    if ($useExisting -eq 'y' -or $useExisting -eq 'Y') {
+        # List available resource groups
+        Write-Host "`nFetching available resource groups..." -ForegroundColor Cyan
+        $existingRGs = Get-AzResourceGroup | Select-Object -ExpandProperty ResourceGroupName
+        
+        if ($existingRGs.Count -eq 0) {
+            Write-Host "No existing resource groups found. Creating a new one." -ForegroundColor Yellow
+            $useExisting = 'n'
+        } else {
+            Write-Host "`nAvailable Resource Groups:" -ForegroundColor Cyan
+            for ($i = 0; $i -lt $existingRGs.Count; $i++) {
+                Write-Host "  $($i + 1). $($existingRGs[$i])" -ForegroundColor White
+            }
+            
+            $rgChoice = Read-Host "`nSelect resource group (1-$($existingRGs.Count)), or press Enter to create new"
+            
+            if ($rgChoice -and $rgChoice -match '^\d+$' -and [int]$rgChoice -le $existingRGs.Count -and [int]$rgChoice -gt 0) {
+                $ResourceGroupName = $existingRGs[[int]$rgChoice - 1]
+                Write-Host "✓ Using existing resource group: $ResourceGroupName" -ForegroundColor Green
+                
+                # Get location from existing RG
+                $existingRG = Get-AzResourceGroup -Name $ResourceGroupName
+                $Location = $existingRG.Location
+                Write-Host "  Location: $Location" -ForegroundColor Gray
+            } else {
+                $useExisting = 'n'
+            }
+        }
+    }
+    
+    # Create new resource group if not using existing
+    if ($useExisting -ne 'y' -and $useExisting -ne 'Y') {
+        $timestamp = Get-Date -Format "yyyyMMddHHmm"
+        $ResourceGroupName = "rg-tts-$timestamp"
+        
+        Write-Host "Creating new resource group: $ResourceGroupName" -ForegroundColor Cyan
+        New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force | Out-Null
+        Write-Host "✓ Resource group created" -ForegroundColor Green
+    }
+} else {
+    # Resource group name provided via parameter
+    $existingRG = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue
+    if ($existingRG) {
+        Write-Host "Using existing resource group: $ResourceGroupName" -ForegroundColor Green
+        $Location = $existingRG.Location
+        Write-Host "  Location: $Location" -ForegroundColor Gray
+    } else {
+        Write-Host "Creating new resource group: $ResourceGroupName" -ForegroundColor Cyan
+        New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force | Out-Null
+        Write-Host "✓ Resource group created" -ForegroundColor Green
+    }
+}
 
 # ============================================================================
-# STEP 3: CREATE KEY VAULT
+# STEP 3: NETWORK CONFIGURATION
 # ============================================================================
 
-Write-Host "`nSTEP 3: Creating Key Vault`n" -ForegroundColor Yellow
+Write-Host "`nSTEP 3: Network Configuration`n" -ForegroundColor Yellow
+
+$createNewVNet = $true
+$vnetResourceId = ""
+$subnetResourceId = ""
+
+# Check if user wants to use existing VNet
+if ([string]::IsNullOrEmpty($VNetName)) {
+    $useExistingVNet = Read-Host "Do you have an existing VNet and Subnet to use? (y/N)"
+    
+    if ($useExistingVNet -eq 'y' -or $useExistingVNet -eq 'Y') {
+        # List available VNets in the resource group
+        Write-Host "`nFetching available VNets in $ResourceGroupName..." -ForegroundColor Cyan
+        $existingVNets = Get-AzVirtualNetwork -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue
+        
+        if ($existingVNets.Count -eq 0) {
+            Write-Host "No existing VNets found in this resource group. New VNet will be created." -ForegroundColor Yellow
+            $createNewVNet = $true
+        } else {
+            Write-Host "`nAvailable VNets:" -ForegroundColor Cyan
+            for ($i = 0; $i -lt $existingVNets.Count; $i++) {
+                Write-Host "  $($i + 1). $($existingVNets[$i].Name) - $($existingVNets[$i].AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor White
+            }
+            
+            $vnetChoice = Read-Host "`nSelect VNet (1-$($existingVNets.Count)), or press Enter to create new"
+            
+            if ($vnetChoice -and $vnetChoice -match '^\d+$' -and [int]$vnetChoice -le $existingVNets.Count -and [int]$vnetChoice -gt 0) {
+                $selectedVNet = $existingVNets[[int]$vnetChoice - 1]
+                $VNetName = $selectedVNet.Name
+                $vnetResourceId = $selectedVNet.Id
+                
+                Write-Host "✓ Selected VNet: $VNetName" -ForegroundColor Green
+                
+                # List subnets
+                if ($selectedVNet.Subnets.Count -eq 0) {
+                    Write-Host "  No subnets found in this VNet. New VNet will be created." -ForegroundColor Yellow
+                    $createNewVNet = $true
+                } else {
+                    Write-Host "`n  Available Subnets:" -ForegroundColor Cyan
+                    for ($i = 0; $i -lt $selectedVNet.Subnets.Count; $i++) {
+                        Write-Host "    $($i + 1). $($selectedVNet.Subnets[$i].Name) - $($selectedVNet.Subnets[$i].AddressPrefix)" -ForegroundColor White
+                    }
+                    
+                    $subnetChoice = Read-Host "`n  Select Subnet (1-$($selectedVNet.Subnets.Count))"
+                    
+                    if ($subnetChoice -and $subnetChoice -match '^\d+$' -and [int]$subnetChoice -le $selectedVNet.Subnets.Count -and [int]$subnetChoice -gt 0) {
+                        $selectedSubnet = $selectedVNet.Subnets[[int]$subnetChoice - 1]
+                        $SubnetName = $selectedSubnet.Name
+                        $subnetResourceId = $selectedSubnet.Id
+                        
+                        Write-Host "  ✓ Selected Subnet: $SubnetName" -ForegroundColor Green
+                        $createNewVNet = $false
+                    } else {
+                        Write-Host "  Invalid selection. New VNet will be created." -ForegroundColor Yellow
+                        $createNewVNet = $true
+                    }
+                }
+            } else {
+                $createNewVNet = $true
+            }
+        }
+    }
+}
+
+if ($createNewVNet) {
+    Write-Host "✓ New VNet and Subnet will be created automatically by Bicep template" -ForegroundColor Green
+}
+
+# ============================================================================
+# STEP 4: OPTIONAL ACR CONFIGURATION
+# ============================================================================
+
+Write-Host "`nSTEP 4: Container Registry Configuration`n" -ForegroundColor Yellow
+
+if (-not $UseCustomAcr) {
+    $useAcrChoice = Read-Host "Do you want to use Azure Container Registry for custom images? (y/N)"
+    
+    if ($useAcrChoice -eq 'y' -or $useAcrChoice -eq 'Y') {
+        $UseCustomAcr = $true
+        
+        if ([string]::IsNullOrEmpty($AcrName)) {
+            # List available ACRs
+            Write-Host "`nFetching available Azure Container Registries..." -ForegroundColor Cyan
+            $existingACRs = Get-AzContainerRegistry -ErrorAction SilentlyContinue
+            
+            if ($existingACRs.Count -eq 0) {
+                Write-Host "No existing ACRs found. Please create one first or use Docker Hub." -ForegroundColor Yellow
+                $UseCustomAcr = $false
+            } else {
+                Write-Host "`nAvailable Container Registries:" -ForegroundColor Cyan
+                for ($i = 0; $i -lt $existingACRs.Count; $i++) {
+                    Write-Host "  $($i + 1). $($existingACRs[$i].Name) - $($existingACRs[$i].LoginServer)" -ForegroundColor White
+                }
+                
+                $acrChoice = Read-Host "`nSelect ACR (1-$($existingACRs.Count)), or press Enter to use Docker Hub"
+                
+                if ($acrChoice -and $acrChoice -match '^\d+$' -and [int]$acrChoice -le $existingACRs.Count -and [int]$acrChoice -gt 0) {
+                    $AcrName = $existingACRs[[int]$acrChoice - 1].Name
+                    Write-Host "✓ Using ACR: $AcrName" -ForegroundColor Green
+                } else {
+                    $UseCustomAcr = $false
+                }
+            }
+        }
+    }
+}
+
+if (-not $UseCustomAcr) {
+    Write-Host "✓ Using official Docker Hub image: thethingsindustries/lorawan-stack:v3.30.2" -ForegroundColor Green
+}
+
+# ============================================================================
+# STEP 5: COLLECT REMAINING PARAMETERS
+# ============================================================================
+
+Write-Host "`nSTEP 5: Additional Configuration`n" -ForegroundColor Yellow
+
+# ============================================================================
+# STEP 6: CREATE KEY VAULT
+# ============================================================================
+
+Write-Host "`nSTEP 6: Creating Key Vault`n" -ForegroundColor Yellow
 
 $kvSuffix = -join ((48..57) + (97..102) | Get-Random -Count 8 | ForEach-Object {[char]$_})
 $keyVaultName = "kv-tts-$kvSuffix"
@@ -140,7 +345,7 @@ try {
     # Create Key Vault (RBAC is enabled by default)
     New-AzKeyVault `
         -Name $keyVaultName `
-        -ResourceGroupName $resourceGroupName `
+        -ResourceGroupName $ResourceGroupName `
         -Location $Location `
         -EnabledForTemplateDeployment `
         -EnabledForDeployment `
@@ -151,7 +356,7 @@ try {
     # Assign Key Vault Secrets Officer role to current user
     Write-Host "Assigning Key Vault Secrets Officer role..." -ForegroundColor Cyan
     
-    $kvResourceId = (Get-AzKeyVault -VaultName $keyVaultName -ResourceGroupName $resourceGroupName).ResourceId
+    $kvResourceId = (Get-AzKeyVault -VaultName $keyVaultName -ResourceGroupName $ResourceGroupName).ResourceId
     
     New-AzRoleAssignment `
         -ObjectId $currentUserId `
@@ -168,10 +373,10 @@ catch {
 }
 
 # ============================================================================
-# STEP 4: ADD SECRETS TO KEY VAULT
+# STEP 7: ADD SECRETS TO KEY VAULT
 # ============================================================================
 
-Write-Host "`nSTEP 4: Adding Secrets to Key Vault`n" -ForegroundColor Yellow
+Write-Host "`nSTEP 7: Adding Secrets to Key Vault`n" -ForegroundColor Yellow
 
 # Define all secrets
 $secrets = @{
@@ -201,10 +406,10 @@ foreach ($secretName in $secrets.Keys) {
 Write-Host "`n✓ All secrets added" -ForegroundColor Green
 
 # ============================================================================
-# STEP 5: CONFIRM SECRETS
+# STEP 8: CONFIRM SECRETS
 # ============================================================================
 
-Write-Host "`nSTEP 5: Confirming Secrets`n" -ForegroundColor Yellow
+Write-Host "`nSTEP 8: Confirming Secrets`n" -ForegroundColor Yellow
 
 Start-Sleep -Seconds 5
 
@@ -231,13 +436,13 @@ catch {
 }
 
 # ============================================================================
-# STEP 6: DEPLOY TEMPLATE
+# STEP 9: DEPLOY TEMPLATE
 # ============================================================================
 
-Write-Host "`nSTEP 6: Deploying Infrastructure`n" -ForegroundColor Yellow
+Write-Host "`nSTEP 9: Deploying Infrastructure`n" -ForegroundColor Yellow
 
 $deploymentParams = @{
-    ResourceGroupName     = $resourceGroupName
+    ResourceGroupName     = $ResourceGroupName
     TemplateFile          = ".\deployments\vm\tts-docker-deployment.bicep"
     location              = $Location
     environmentName       = $EnvironmentName
@@ -255,15 +460,35 @@ $deploymentParams = @{
     Verbose               = $true
 }
 
+# Add VNet/Subnet parameters if using existing network
+if (-not $createNewVNet -and $vnetResourceId -and $subnetResourceId) {
+    $deploymentParams.useExistingVNet = $true
+    $deploymentParams.existingVNetId = $vnetResourceId
+    $deploymentParams.existingSubnetId = $subnetResourceId
+}
+
+# Add ACR parameters if using custom registry
+if ($UseCustomAcr -and -not [string]::IsNullOrEmpty($AcrName)) {
+    $deploymentParams.useCustomAcr = $true
+    $deploymentParams.acrName = $AcrName
+}
+
 if (-not [string]::IsNullOrEmpty($DomainName)) {
     $deploymentParams.domainName = $DomainName
 }
 
 Write-Host "Starting template deployment..." -ForegroundColor Cyan
-Write-Host "  Resource Group: $resourceGroupName" -ForegroundColor Gray
+Write-Host "  Resource Group: $ResourceGroupName" -ForegroundColor Gray
 Write-Host "  Location: $Location" -ForegroundColor Gray
 Write-Host "  Environment: $EnvironmentName" -ForegroundColor Gray
 Write-Host "  Key Vault: $keyVaultName" -ForegroundColor Gray
+if (-not $createNewVNet) {
+    Write-Host "  VNet: $VNetName" -ForegroundColor Gray
+    Write-Host "  Subnet: $SubnetName" -ForegroundColor Gray
+}
+if ($UseCustomAcr) {
+    Write-Host "  ACR: $AcrName" -ForegroundColor Gray
+}
 if ($DomainName) {
     Write-Host "  Domain: $DomainName" -ForegroundColor Gray
 }

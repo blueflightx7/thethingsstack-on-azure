@@ -189,9 +189,15 @@ switch ($Mode.ToLower()) {
         Write-Host "📦 Starting Quick VM Deployment..." -ForegroundColor Cyan
         Write-Host "   Using: deployments/vm/deploy-simple.ps1`n" -ForegroundColor Gray
         
-        $params = @{
-            Location = $Location
-            EnvironmentName = $EnvironmentName
+        $params = @{}
+        
+        # Optional: Pass Location if specified
+        if ($Location -and $Location -ne "centralus") { 
+            $params.Location = $Location 
+        }
+        
+        if ($EnvironmentName -and $EnvironmentName -ne "ttsprod") { 
+            $params.EnvironmentName = $EnvironmentName 
         }
         
         if ($AdminEmail) { $params.AdminEmail = $AdminEmail }
@@ -216,6 +222,11 @@ switch ($Mode.ToLower()) {
         # Prepare parameters
         $params = @{
             EnvironmentName = $EnvironmentName
+        }
+        
+        # Optional: Pass Location if specified
+        if ($Location -and $Location -ne "centralus") { 
+            $params.Location = $Location 
         }
         
         if ($AdminEmail) { $params.AdminEmail = $AdminEmail }

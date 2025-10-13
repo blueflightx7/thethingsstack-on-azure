@@ -9,18 +9,18 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Location = "centralus",
+    [string]$Location = "",
     
-    [Parameter(Mandatory=$true, HelpMessage="Environment name (alphanumeric only, max 16 chars)")]
+    [Parameter(Mandatory=$false, HelpMessage="Environment name (alphanumeric only, max 16 chars)")]
     [ValidatePattern('^[a-z0-9]{3,16}$')]
-    [string]$EnvironmentName,
+    [string]$EnvironmentName = "",
     
-    [Parameter(Mandatory=$true, HelpMessage="Admin email for Let's Encrypt and TTS console")]
+    [Parameter(Mandatory=$false, HelpMessage="Admin email for Let's Encrypt and TTS console")]
     [ValidatePattern('^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')]
-    [string]$AdminEmail,
+    [string]$AdminEmail = "",
     
-    [Parameter(Mandatory=$true, HelpMessage="Domain name for TTS deployment (e.g., tts.example.com)")]
-    [string]$DomainName,
+    [Parameter(Mandatory=$false, HelpMessage="Domain name for TTS deployment (e.g., tts.example.com)")]
+    [string]$DomainName = "",
     
     [Parameter(Mandatory=$false)]
     [string]$TtsHelmVersion = "3.30.2",
@@ -32,7 +32,16 @@ param(
     [switch]$UseRedisEnterprise,  # Use Azure Cache for Redis Enterprise instead of in-cluster
     
     [Parameter(Mandatory=$false)]
-    [switch]$InfrastructureOnly  # Deploy infrastructure only (no Helm/kubectl required)
+    [switch]$InfrastructureOnly,  # Deploy infrastructure only (no Helm/kubectl required)
+    
+    [Parameter(Mandatory=$false)]
+    [string]$ResourceGroupName = "",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$VNetName = "",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$SubnetName = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,10 +59,208 @@ Write-Host @"
 "@ -ForegroundColor Green
 
 # ==============================================================================
+# COLLECT REQUIRED PARAMETERS
+# ==============================================================================
+
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+Write-Host "  DEPLOYMENT CONFIGURATION" -ForegroundColor Yellow
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
+
+# Prompt for Azure region if not provided
+if ([string]::IsNullOrEmpty($Location)) {
+    Write-Host "`nAvailable Azure Regions (Popular):" -ForegroundColor Cyan
+    Write-Host "  1. centralus (Central US)" -ForegroundColor White
+    Write-Host "  2. eastus (East US)" -ForegroundColor White
+    Write-Host "  3. westus2 (West US 2)" -ForegroundColor White
+    Write-Host "  4. westeurope (West Europe)" -ForegroundColor White
+    Write-Host "  5. northeurope (North Europe)" -ForegroundColor White
+    Write-Host "  6. eastasia (East Asia)" -ForegroundColor White
+    Write-Host "  7. southeastasia (Southeast Asia)" -ForegroundColor White
+    Write-Host "  8. Custom (enter your own)`n" -ForegroundColor White
+    
+    $regionChoice = Read-Host "Select region (1-8, or press Enter for default: centralus)"
+    
+    switch ($regionChoice) {
+        "1" { $Location = "centralus" }
+        "2" { $Location = "eastus" }
+        "3" { $Location = "westus2" }
+        "4" { $Location = "westeurope" }
+        "5" { $Location = "northeurope" }
+        "6" { $Location = "eastasia" }
+        "7" { $Location = "southeastasia" }
+        "8" { $Location = Read-Host "Enter Azure region name" }
+        default { $Location = "centralus" }
+    }
+    
+    Write-Host "✓ Selected region: $Location" -ForegroundColor Green
+}
+
+# Prompt for Environment Name if not provided
+if ([string]::IsNullOrEmpty($EnvironmentName)) {
+    Write-Host "`nEnvironment name (alphanumeric only, 3-16 chars, e.g., 'ttsprod'):" -ForegroundColor Cyan
+    $EnvironmentName = Read-Host "Environment Name"
+    
+    if ($EnvironmentName -notmatch '^[a-z0-9]{3,16}$') {
+        Write-Error "Invalid environment name. Must be alphanumeric only, 3-16 characters."
+        exit 1
+    }
+}
+
+# Prompt for Admin Email if not provided
+if ([string]::IsNullOrEmpty($AdminEmail)) {
+    Write-Host "`nAdmin email address (for Let's Encrypt & TTS admin):" -ForegroundColor Cyan
+    $AdminEmail = Read-Host "Admin Email"
+    
+    if ($AdminEmail -notmatch '^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$') {
+        Write-Error "Invalid email format: $AdminEmail"
+        exit 1
+    }
+}
+
+# Prompt for Domain Name if not provided
+if ([string]::IsNullOrEmpty($DomainName)) {
+    Write-Host "`nDomain name for TTS deployment (e.g., tts.example.com):" -ForegroundColor Cyan
+    $DomainName = Read-Host "Domain Name"
+}
+
+# ==============================================================================
+# RESOURCE GROUP CONFIGURATION
+# ==============================================================================
+
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+Write-Host "  RESOURCE GROUP CONFIGURATION" -ForegroundColor Yellow
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
+
+# Check if user wants to use existing resource group
+if ([string]::IsNullOrEmpty($ResourceGroupName)) {
+    $useExisting = Read-Host "Do you have an existing resource group to use? (y/N)"
+    
+    if ($useExisting -eq 'y' -or $useExisting -eq 'Y') {
+        # List available resource groups
+        Write-Host "`nFetching available resource groups..." -ForegroundColor Cyan
+        $existingRGs = Get-AzResourceGroup | Select-Object -ExpandProperty ResourceGroupName
+        
+        if ($existingRGs.Count -eq 0) {
+            Write-Host "No existing resource groups found. Will create a new one." -ForegroundColor Yellow
+            $ResourceGroupName = "rg-$EnvironmentName"
+        } else {
+            Write-Host "`nAvailable Resource Groups:" -ForegroundColor Cyan
+            for ($i = 0; $i -lt $existingRGs.Count; $i++) {
+                Write-Host "  $($i + 1). $($existingRGs[$i])" -ForegroundColor White
+            }
+            
+            $rgChoice = Read-Host "`nSelect resource group (1-$($existingRGs.Count)), or press Enter to create new"
+            
+            if ($rgChoice -and $rgChoice -match '^\d+$' -and [int]$rgChoice -le $existingRGs.Count -and [int]$rgChoice -gt 0) {
+                $ResourceGroupName = $existingRGs[[int]$rgChoice - 1]
+                Write-Host "✓ Using existing resource group: $ResourceGroupName" -ForegroundColor Green
+                
+                # Get location from existing RG
+                $existingRG = Get-AzResourceGroup -Name $ResourceGroupName
+                $Location = $existingRG.Location
+                Write-Host "  Location: $Location" -ForegroundColor Gray
+            } else {
+                $ResourceGroupName = "rg-$EnvironmentName"
+            }
+        }
+    } else {
+        $ResourceGroupName = "rg-$EnvironmentName"
+    }
+} else {
+    # Resource group name provided via parameter
+    Write-Host "Using resource group: $ResourceGroupName" -ForegroundColor Green
+}
+
+# ==============================================================================
+# NETWORK CONFIGURATION
+# ==============================================================================
+
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+Write-Host "  NETWORK CONFIGURATION" -ForegroundColor Yellow
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
+
+$createNewVNet = $true
+$vnetResourceId = ""
+$subnetResourceId = ""
+
+# Check if user wants to use existing VNet
+if ([string]::IsNullOrEmpty($VNetName)) {
+    $useExistingVNet = Read-Host "Do you have an existing VNet and Subnet to use? (y/N)"
+    
+    if ($useExistingVNet -eq 'y' -or $useExistingVNet -eq 'Y') {
+        # List available VNets in the resource group
+        Write-Host "`nFetching available VNets..." -ForegroundColor Cyan
+        
+        # Check if RG exists first
+        $existingRG = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue
+        if ($existingRG) {
+            $existingVNets = Get-AzVirtualNetwork -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue
+        } else {
+            $existingVNets = @()
+        }
+        
+        if ($existingVNets.Count -eq 0) {
+            Write-Host "No existing VNets found. New VNet will be created." -ForegroundColor Yellow
+            $createNewVNet = $true
+        } else {
+            Write-Host "`nAvailable VNets:" -ForegroundColor Cyan
+            for ($i = 0; $i -lt $existingVNets.Count; $i++) {
+                Write-Host "  $($i + 1). $($existingVNets[$i].Name) - $($existingVNets[$i].AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor White
+            }
+            
+            $vnetChoice = Read-Host "`nSelect VNet (1-$($existingVNets.Count)), or press Enter to create new"
+            
+            if ($vnetChoice -and $vnetChoice -match '^\d+$' -and [int]$vnetChoice -le $existingVNets.Count -and [int]$vnetChoice -gt 0) {
+                $selectedVNet = $existingVNets[[int]$vnetChoice - 1]
+                $VNetName = $selectedVNet.Name
+                $vnetResourceId = $selectedVNet.Id
+                
+                Write-Host "✓ Selected VNet: $VNetName" -ForegroundColor Green
+                
+                # List subnets
+                if ($selectedVNet.Subnets.Count -eq 0) {
+                    Write-Host "  No subnets found in this VNet. New VNet will be created." -ForegroundColor Yellow
+                    $createNewVNet = $true
+                } else {
+                    Write-Host "`n  Available Subnets:" -ForegroundColor Cyan
+                    for ($i = 0; $i -lt $selectedVNet.Subnets.Count; $i++) {
+                        Write-Host "    $($i + 1). $($selectedVNet.Subnets[$i].Name) - $($selectedVNet.Subnets[$i].AddressPrefix)" -ForegroundColor White
+                    }
+                    
+                    $subnetChoice = Read-Host "`n  Select Subnet (1-$($selectedVNet.Subnets.Count))"
+                    
+                    if ($subnetChoice -and $subnetChoice -match '^\d+$' -and [int]$subnetChoice -le $selectedVNet.Subnets.Count -and [int]$subnetChoice -gt 0) {
+                        $selectedSubnet = $selectedVNet.Subnets[[int]$subnetChoice - 1]
+                        $SubnetName = $selectedSubnet.Name
+                        $subnetResourceId = $selectedSubnet.Id
+                        
+                        Write-Host "  ✓ Selected Subnet: $SubnetName" -ForegroundColor Green
+                        $createNewVNet = $false
+                    } else {
+                        Write-Host "  Invalid selection. New VNet will be created." -ForegroundColor Yellow
+                        $createNewVNet = $true
+                    }
+                }
+            } else {
+                $createNewVNet = $true
+            }
+        }
+    }
+}
+
+if ($createNewVNet) {
+    Write-Host "✓ New VNet and Subnets will be created automatically by Bicep template" -ForegroundColor Green
+}
+
+# ==============================================================================
 # CONFIGURATION
 # ==============================================================================
 
-$ResourceGroupName = "rg-$EnvironmentName"
+# Resource names (only set if not already configured)
+if ([string]::IsNullOrEmpty($ResourceGroupName)) {
+    $ResourceGroupName = "rg-$EnvironmentName"
+}
+
 $AksClusterName = "$EnvironmentName-aks"
 $KeyVaultName = "$EnvironmentName-kv"
 $PostgresServerName = "$EnvironmentName-db"
@@ -69,6 +276,10 @@ Write-Host "  Location: $Location" -ForegroundColor White
 Write-Host "  Domain: $DomainName" -ForegroundColor White
 Write-Host "  Admin Email: $AdminEmail" -ForegroundColor White
 Write-Host "  Resource Group: $ResourceGroupName" -ForegroundColor White
+if (-not $createNewVNet) {
+    Write-Host "  VNet: $VNetName" -ForegroundColor White
+    Write-Host "  Subnet: $SubnetName" -ForegroundColor White
+}
 Write-Host "  TTS Helm Version: $TtsHelmVersion" -ForegroundColor White
 Write-Host "  Redis Strategy: $(if ($UseRedisEnterprise) { 'Azure Cache Enterprise E10' } else { 'In-Cluster StatefulSet' })" -ForegroundColor White
 
