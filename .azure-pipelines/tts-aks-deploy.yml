@@ -1,0 +1,278 @@
+# Azure Pipelines CI/CD for The Things Stack on AKS
+# Continuous deployment to Azure Kubernetes Service (AKS Automatic)
+
+trigger:
+  branches:
+    include:
+    - master
+    - azure-update-aks
+  paths:
+    include:
+    - deployments/kubernetes/*
+    - .azure-pipelines/tts-aks-deploy.yml
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Environment configuration
+  - group: tts-deployment-secrets  # Azure DevOps variable group
+  - name: environmentName
+    value: 'tts-prod'
+  - name: location
+    value: 'centralus'
+  - name: domainName
+    value: '$(TTS_DOMAIN)'  # From variable group
+  - name: adminEmail
+    value: '$(ADMIN_EMAIL)'  # From variable group
+  - name: useRedisEnterprise
+    value: 'true'  # Use Azure Cache for Redis Enterprise
+
+stages:
+- stage: Validate
+  displayName: 'Validate Infrastructure'
+  jobs:
+  - job: ValidateBicep
+    displayName: 'Validate Bicep Template'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Install Bicep CLI'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az bicep version
+          az bicep upgrade
+    
+    - task: AzureCLI@2
+      displayName: 'Build Bicep Template'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az bicep build --file deployments/kubernetes/tts-aks-deployment.bicep
+    
+    - task: AzureCLI@2
+      displayName: 'Validate Deployment'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az deployment group validate \
+            --resource-group rg-$(environmentName) \
+            --template-file deployments/kubernetes/tts-aks-deployment.bicep \
+            --parameters \
+              environmentName=$(environmentName) \
+              location=$(location) \
+              adminEmail=$(adminEmail) \
+              databasePassword=$(DB_PASSWORD) \
+              ttsAdminPassword=$(TTS_ADMIN_PASSWORD) \
+              cookieHashKey=$(COOKIE_HASH_KEY) \
+              cookieBlockKey=$(COOKIE_BLOCK_KEY) \
+              clusterKeys=$(CLUSTER_KEYS) \
+              useRedisEnterprise=$(useRedisEnterprise)
+
+- stage: Deploy
+  displayName: 'Deploy to Azure'
+  dependsOn: Validate
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+  jobs:
+  - deployment: DeployInfrastructure
+    displayName: 'Deploy AKS Infrastructure'
+    environment: 'tts-production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          
+          - task: AzureCLI@2
+            displayName: 'Create Resource Group'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az group create \
+                  --name rg-$(environmentName) \
+                  --location $(location)
+          
+          - task: AzureCLI@2
+            displayName: 'Deploy Bicep Infrastructure'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az deployment group create \
+                  --resource-group rg-$(environmentName) \
+                  --template-file deployments/kubernetes/tts-aks-deployment.bicep \
+                  --parameters \
+                    environmentName=$(environmentName) \
+                    location=$(location) \
+                    adminEmail=$(adminEmail) \
+                    databasePassword=$(DB_PASSWORD) \
+                    ttsAdminPassword=$(TTS_ADMIN_PASSWORD) \
+                    cookieHashKey=$(COOKIE_HASH_KEY) \
+                    cookieBlockKey=$(COOKIE_BLOCK_KEY) \
+                    clusterKeys=$(CLUSTER_KEYS) \
+                    useRedisEnterprise=$(useRedisEnterprise) \
+                  --output json > deployment-output.json
+                
+                cat deployment-output.json
+          
+          - task: AzureCLI@2
+            displayName: 'Get AKS Credentials'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                aksClusterName=$(jq -r '.properties.outputs.aksClusterName.value' deployment-output.json)
+                az aks get-credentials \
+                  --resource-group rg-$(environmentName) \
+                  --name $aksClusterName \
+                  --overwrite-existing
+          
+          - task: HelmInstaller@1
+            displayName: 'Install Helm'
+            inputs:
+              helmVersionToInstall: '3.13.0'
+          
+          - task: Bash@3
+            displayName: 'Install cert-manager'
+            inputs:
+              targetType: 'inline'
+              script: |
+                kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+                kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
+                kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
+          
+          - task: Bash@3
+            displayName: 'Create Let''s Encrypt ClusterIssuer'
+            inputs:
+              targetType: 'inline'
+              script: |
+                cat <<EOF | kubectl apply -f -
+                apiVersion: cert-manager.io/v1
+                kind: ClusterIssuer
+                metadata:
+                  name: letsencrypt-prod
+                spec:
+                  acme:
+                    server: https://acme-v02.api.letsencrypt.org/directory
+                    email: $(adminEmail)
+                    privateKeySecretRef:
+                      name: letsencrypt-prod
+                    solvers:
+                    - http01:
+                        ingress:
+                          class: webapprouting.kubernetes.azure.com
+                EOF
+          
+          - task: AzureCLI@2
+            displayName: 'Prepare Helm Values'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                keyVaultName=$(jq -r '.properties.outputs.keyVaultName.value' deployment-output.json)
+                postgresHost=$(jq -r '.properties.outputs.postgresHost.value' deployment-output.json)
+                storageAccountName=$(jq -r '.properties.outputs.storageAccountName.value' deployment-output.json)
+                workloadIdentityClientId=$(jq -r '.properties.outputs.workloadIdentityClientId.value' deployment-output.json)
+                tenantId=$(jq -r '.properties.outputs.tenantId.value' deployment-output.json)
+                redisHost=$(jq -r '.properties.outputs.redisHost.value' deployment-output.json)
+                
+                # Get secrets from Key Vault
+                dbPassword=$(az keyvault secret show --vault-name $keyVaultName --name db-password --query value -o tsv)
+                ttsAdminPassword=$(az keyvault secret show --vault-name $keyVaultName --name tts-admin-password --query value -o tsv)
+                cookieHashKey=$(az keyvault secret show --vault-name $keyVaultName --name cookie-hash-key --query value -o tsv)
+                cookieBlockKey=$(az keyvault secret show --vault-name $keyVaultName --name cookie-block-key --query value -o tsv)
+                clusterKeys=$(az keyvault secret show --vault-name $keyVaultName --name cluster-keys --query value -o tsv)
+                
+                if [ "$(useRedisEnterprise)" == "true" ]; then
+                  redisPassword=$(az keyvault secret show --vault-name $keyVaultName --name redis-password --query value -o tsv)
+                else
+                  redisHost="redis-0.redis.tts.svc.cluster.local:6379"
+                  redisPassword=""
+                fi
+                
+                # Create deployment values file
+                cat > deployment-values.yaml <<EOF
+                global:
+                  domain: "$(domainName)"
+                  deployment:
+                    initialTenant:
+                      adminPassword: "$ttsAdminPassword"
+                      adminEmail: "$(adminEmail)"
+                  blob:
+                    azure:
+                      accountName: "$storageAccountName"
+                      clientID: "$workloadIdentityClientId"
+                  cluster:
+                    keys: "$clusterKeys"
+                  http:
+                    cookie:
+                      blockKey: "$cookieBlockKey"
+                      hashKey: "$cookieHashKey"
+                  redis:
+                    address: "$redisHost"
+                    password: "$redisPassword"
+                
+                is:
+                  database:
+                    uri: "postgres://ttsadmin:$dbPassword@$postgresHost/tts?sslmode=require"
+                
+                workloadIdentity:
+                  clientId: "$workloadIdentityClientId"
+                  tenantId: "$tenantId"
+                
+                gateway:
+                  udp:
+                    annotations:
+                      service.beta.kubernetes.io/azure-load-balancer-resource-group: "rg-$(environmentName)"
+                EOF
+          
+          - task: HelmDeploy@0
+            displayName: 'Deploy The Things Stack'
+            inputs:
+              connectionType: 'None'
+              namespace: 'tts'
+              command: 'upgrade'
+              chartType: 'Name'
+              chartName: 'oci://registry-1.docker.io/thethingsindustries/lorawan-stack-helm-chart'
+              chartVersion: '3.30.2'
+              releaseName: 'tts'
+              overrideValues: ''
+              valueFile: 'deployment-values.yaml'
+              install: true
+              waitForExecution: true
+              arguments: '--create-namespace --values deployments/kubernetes/values-azure-aks.yaml --timeout 15m'
+          
+          - task: Bash@3
+            displayName: 'Get Deployment Details'
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "Waiting for ingress IP..."
+                sleep 30
+                
+                ingressIP=$(kubectl get ingress -n tts -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
+                gatewayIP=$(kubectl get svc -n tts -l app=lorawan-stack,component=gateway-server -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
+                
+                echo "========================================"
+                echo "Deployment Complete!"
+                echo "========================================"
+                echo "Console URL: https://$(domainName)"
+                echo "Ingress IP: $ingressIP"
+                echo "Gateway UDP: $gatewayIP:1700"
+                echo "========================================"
+                echo "Next Steps:"
+                echo "1. Create DNS A record: $(domainName) → $ingressIP"
+                echo "2. Wait for TLS certificate: kubectl get certificate -n tts"
+                echo "3. Configure gateways to use: $gatewayIP:1700"
+                echo "========================================"

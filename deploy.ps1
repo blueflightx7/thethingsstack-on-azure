@@ -13,7 +13,7 @@ param(
     [string]$Location = "centralus",
     
     [Parameter(Mandatory=$false)]
-    [string]$EnvironmentName = "tts-prod",
+    [string]$EnvironmentName = "ttsprod",
     
     [Parameter(Mandatory=$false)]
     [string]$AdminEmail,
@@ -187,57 +187,99 @@ Write-Host "━━━━━━━━━━━━━━━━━━━━━━�
 switch ($Mode.ToLower()) {
     "quick" {
         Write-Host "📦 Starting Quick VM Deployment..." -ForegroundColor Cyan
-        Write-Host "   Using: deploy-simple.ps1`n" -ForegroundColor Gray
+        Write-Host "   Using: deployments/vm/deploy-simple.ps1`n" -ForegroundColor Gray
         
-        $params = @{
-            Location = $Location
-            EnvironmentName = $EnvironmentName
+        $params = @{}
+        
+        # Optional: Pass Location if specified
+        if ($Location -and $Location -ne "centralus") { 
+            $params.Location = $Location 
+        }
+        
+        if ($EnvironmentName -and $EnvironmentName -ne "ttsprod") { 
+            $params.EnvironmentName = $EnvironmentName 
         }
         
         if ($AdminEmail) { $params.AdminEmail = $AdminEmail }
         if ($ParametersFile) { $params.ParametersFile = $ParametersFile }
         
-        & "$PSScriptRoot\deploy-simple.ps1" @params
+        & "$PSScriptRoot\deployments\vm\deploy-simple.ps1" @params
     }
     
     "aks" {
         Write-Host "🚀 Starting Production AKS Deployment..." -ForegroundColor Green
-        Write-Host "   Using: deployments/kubernetes/deploy-aks.ps1`n" -ForegroundColor Gray
+        Write-Host "   Using: deployments/kubernetes/deploy-aks.ps1" -ForegroundColor Gray
+        Write-Host "   Mode: AKS Automatic with Azure Best Practices`n" -ForegroundColor Gray
         
         # Check if AKS deployment script exists
         $aksDeployScript = "$PSScriptRoot\deployments\kubernetes\deploy-aks.ps1"
-        if (Test-Path $aksDeployScript) {
-            $params = @{
-                Location = $Location
-                EnvironmentName = $EnvironmentName
-            }
+        if (-not (Test-Path $aksDeployScript)) {
+            Write-Host "❌ Error: AKS deployment script not found" -ForegroundColor Red
+            Write-Host "   Expected: $aksDeployScript`n" -ForegroundColor Red
+            exit 1
+        }
+        
+        # Prepare parameters
+        $params = @{
+            EnvironmentName = $EnvironmentName
+        }
+        
+        # Optional: Pass Location if specified
+        if ($Location -and $Location -ne "centralus") { 
+            $params.Location = $Location 
+        }
+        
+        if ($AdminEmail) { $params.AdminEmail = $AdminEmail }
+        
+        # Redis Enterprise option
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+        Write-Host "  REDIS CONFIGURATION" -ForegroundColor Yellow
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
+        
+        Write-Host "Select Redis deployment:" -ForegroundColor Cyan
+        Write-Host "  [1] Azure Cache for Redis Enterprise E10 (Recommended)" -ForegroundColor Green
+        Write-Host "      • Fully managed, Redis 7.2" -ForegroundColor Gray
+        Write-Host "      • 12 GB cache, zone-redundant" -ForegroundColor Gray
+        Write-Host "      • Cost: ~`$175/month`n" -ForegroundColor Gray
+        
+        Write-Host "  [2] In-Cluster Redis StatefulSet (Lower cost)" -ForegroundColor White
+        Write-Host "      • Self-managed in Kubernetes" -ForegroundColor Gray
+        Write-Host "      • Requires PersistentVolume management" -ForegroundColor Gray
+        Write-Host "      • Cost: ~`$20/month (storage only)`n" -ForegroundColor Gray
+        
+        $redisChoice = Read-Host "Selection [1-2]"
+        $params.UseRedisEnterprise = ($redisChoice -eq "1")
+        
+        # Domain name (required for AKS)
+        if ([string]::IsNullOrEmpty($ParametersFile)) {
+            Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+            Write-Host "  DOMAIN CONFIGURATION" -ForegroundColor Yellow
+            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
             
-            if ($AdminEmail) { $params.AdminEmail = $AdminEmail }
-            if ($ParametersFile) { $params.ParametersFile = $ParametersFile }
+            Write-Host "Enter your domain name for TTS Console:" -ForegroundColor Cyan
+            Write-Host "(Example: tts.example.com)" -ForegroundColor Gray
+            $DomainName = Read-Host "Domain"
             
-            & $aksDeployScript @params
-        } else {
-            Write-Host "⚠️  AKS deployment not yet implemented" -ForegroundColor Yellow
-            Write-Host "`nThe AKS/Kubernetes deployment is under development." -ForegroundColor White
-            Write-Host "Current status:" -ForegroundColor White
-            Write-Host "  ✅ Architecture planned (see docs/ARCHITECTURE.md)" -ForegroundColor Green
-            Write-Host "  🔨 Implementation in progress" -ForegroundColor Yellow
-            Write-Host "  📋 Expected completion: Next release`n" -ForegroundColor Gray
-            
-            Write-Host "For production deployments, we recommend:" -ForegroundColor Cyan
-            Write-Host "  1. Start with VM deployment for immediate use" -ForegroundColor White
-            Write-Host "  2. Scale VM vertically (larger size) if needed" -ForegroundColor White
-            Write-Host "  3. Migrate to AKS when available`n" -ForegroundColor White
-            
-            $useVM = Read-Host "Would you like to deploy with VM instead? (yes/no)"
-            if ($useVM -eq "yes") {
-                $Mode = "quick"
-                & "$PSScriptRoot\deploy-simple.ps1" -Location $Location -EnvironmentName $EnvironmentName
-            } else {
-                Write-Host "`nDeployment cancelled." -ForegroundColor Yellow
-                exit 0
+            if (-not [string]::IsNullOrEmpty($DomainName)) {
+                $params.DomainName = $DomainName
             }
         }
+        
+        Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+        Write-Host "  STARTING AKS DEPLOYMENT" -ForegroundColor Green
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Green
+        
+        Write-Host "⏱️  Estimated deployment time: 20-30 minutes" -ForegroundColor Yellow
+        Write-Host "📊 This will deploy:" -ForegroundColor Cyan
+        Write-Host "   • AKS Automatic cluster (Standard tier)" -ForegroundColor White
+        Write-Host "   • PostgreSQL Flexible Server (zone-redundant)" -ForegroundColor White
+        Write-Host "   • Azure Cache for Redis $(if ($params.UseRedisEnterprise) { 'Enterprise E10' } else { 'StatefulSet' })" -ForegroundColor White
+        Write-Host "   • Azure Blob Storage (user uploads)" -ForegroundColor White
+        Write-Host "   • Managed NGINX Ingress + cert-manager" -ForegroundColor White
+        Write-Host "   • Azure Monitor + Managed Prometheus`n" -ForegroundColor White
+        
+        # Execute deployment
+        & $aksDeployScript @params
     }
     
     "vm" {

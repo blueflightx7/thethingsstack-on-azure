@@ -13,7 +13,7 @@ This is a **production-ready deployment system** for The Things Stack (LoRaWAN N
 ```
 deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
 │
-├── Mode: quick ──► deploy-simple.ps1 ──► deployments/vm/tts-docker-deployment.bicep
+├── Mode: quick ──► deployments/vm/deploy-simple.ps1 ──► deployments/vm/tts-docker-deployment.bicep
 ├── Mode: aks ────► deployments/kubernetes/deploy-aks.ps1 ──► deployments/kubernetes/tts-aks-deployment.bicep
 └── Mode: vm ─────► Inline advanced deployment ──► deployments/vm/tts-docker-deployment.bicep
 ```
@@ -35,12 +35,12 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
    printf 'password\npassword\n' | create-admin-user
    ```
 
-2. **SSH IP Restriction** (`deploy-simple.ps1:82-100`):
+2. **SSH IP Restriction** (`deployments/vm/deploy-simple.ps1:82-100`):
    - Auto-detect deployer IP via `ipify.org` API
    - NSG rule uses detected IP, **never** `*` for production
    - `adminSourceIP` parameter passed to Bicep
 
-3. **Key Vault RBAC** (`deploy-simple.ps1:128-160`):
+3. **Key Vault RBAC** (`deployments/vm/deploy-simple.ps1:128-160`):
    - Wait 30 seconds after role assignment for propagation
    - Use `Key Vault Secrets Officer` role for deployment user
    - All 8 secrets required: db-password, tts-admin-password, tts-admin-username, cookie-hash-key, cookie-block-key, oauth-client-secret, admin-email, checksum
@@ -83,6 +83,7 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
 - 6-step orchestration: Collect params → Create RG → Create KV → Add secrets → Confirm → Deploy
 - Auto-detects IP, creates Key Vault, stores 8 secrets, then deploys Bicep
 - Default template path: `.\deployments\vm\tts-docker-deployment.bicep`
+- **Location**: `deployments/vm/deploy-simple.ps1`
 
 **Error Handling**:
 ```powershell
@@ -180,7 +181,7 @@ az deployment group show -g <rg-name> -n <deployment-name>
 
 **Must Read Before Changes**:
 - `deployments/vm/tts-docker-deployment.bicep` - Core infrastructure (852 lines, includes all 7 fixes)
-- `deploy-simple.ps1` - Standard orchestration (316 lines, Key Vault + secrets)
+- `deployments/vm/deploy-simple.ps1` - Standard orchestration (316 lines, Key Vault + secrets)
 - `deploy.ps1` - Primary entry point (menu system)
 
 **Reference for Patterns**:
@@ -192,7 +193,7 @@ az deployment group show -g <rg-name> -n <deployment-name>
 ### Adding a New Deployment Parameter
 
 1. Add to Bicep template parameters (top of file)
-2. Add to `deploy-simple.ps1` script parameters
+2. Add to `deployments/vm/deploy-simple.ps1` script parameters
 3. Pass through in `$deploymentParams` hashtable (line 233)
 4. Update `README.md` deployment options section
 5. Update `docs/DEPLOYMENT_ORCHESTRATION.md` if affecting modes
@@ -248,6 +249,97 @@ When generating deployment code for production:
 7. ✅ Document admin credentials securely
 8. ✅ Reference `SECURITY_HARDENING.md` for additional hardening
 
+## AKS Architecture Patterns
+
+### Current State (Bicep Template)
+
+**What's Deployed**:
+- AKS cluster (3 nodes, zone-redundant, Azure CNI networking)
+- PostgreSQL Flexible Server with **private access** (VNet-integrated)
+- Azure Container Registry
+- Key Vault with RBAC
+- VNet (10.0.0.0/16) with 2 subnets: AKS (10.0.0.0/22), Database (10.0.4.0/24)
+- Standard Load Balancer
+- Monitoring (Log Analytics + App Insights)
+
+**What's Missing** (needs to be added for complete deployment):
+- Ingress Controller (nginx or Application Gateway)
+- cert-manager for TLS automation
+- Redis deployment (Azure Cache for Redis or StatefulSet)
+- TTS Kubernetes manifests (Deployments, Services, ConfigMaps)
+- Helm chart for TTS application
+
+### Ingress Architecture
+
+**External Access Flow**:
+```
+Internet (HTTPS) → Azure Load Balancer → Ingress Controller (nginx)
+  → Service (ClusterIP) → TTS Pods
+```
+
+**LoRaWAN UDP Traffic** (special case):
+```
+Internet (UDP 1700) → LoadBalancer Service (bypasses Ingress)
+  → Gateway Server Pods
+```
+
+**Why UDP bypasses Ingress**: Ingress Controllers handle HTTP/HTTPS only. LoRaWAN gateway traffic (UDP port 1700) requires a separate LoadBalancer Service for Layer 4 routing.
+
+### Redis Access Patterns
+
+**Option A: Azure Cache for Redis** (Recommended for production):
+- VNet injection into dedicated subnet (10.0.6.0/24)
+- TTS pods connect via private endpoint (no public access)
+- Connection string: `<cache-name>.redis.cache.windows.net:6380` (TLS enabled)
+- Password from Key Vault
+
+**Option B: Redis StatefulSet** (Lower cost, more operational burden):
+- Headless Service: `redis.tts.svc.cluster.local`
+- PersistentVolumeClaims backed by Azure Premium SSD
+- Connection string: `redis-0.redis.tts.svc.cluster.local:6379`
+
+### PostgreSQL Private Access
+
+**How it works**:
+1. PostgreSQL deploys into delegated subnet (10.0.4.0/24)
+2. Private DNS zone (`privatelink.postgres.database.azure.com`) linked to VNet
+3. TTS pods in AKS subnet (10.0.0.0/22) resolve FQDN to private IP (10.0.4.x)
+4. **No public endpoint** - all traffic stays within VNet
+5. Connection string stored in Key Vault, injected via CSI driver or env vars
+
+**Security features**:
+- TLS 1.2 enforced
+- Zone-redundant (primary in Zone 1, standby in Zone 2)
+- Auto-failover <60 seconds
+
+### Network Flow Summary
+
+```
+Internet → Load Balancer (Public IP)
+  ├─► Ingress Controller (HTTPS) → TTS Services → Pods
+  │     └─► Redis (private subnet or StatefulSet)
+  │     └─► PostgreSQL (private subnet 10.0.4.0/24)
+  └─► LoadBalancer Service (UDP 1700) → Gateway Server Pods
+        └─► Redis
+        └─► PostgreSQL
+```
+
+**All internal traffic**: Pods communicate with Redis and PostgreSQL using private IPs within VNet (10.0.0.0/16).
+
+### When Modifying AKS Infrastructure
+
+**Before editing tts-aks-deployment.bicep**:
+1. Check if change affects networking (subnets, NSG, private DNS)
+2. Validate PostgreSQL private access remains intact
+3. Ensure Key Vault RBAC for AKS system identity is preserved
+4. Test with `bicep build` before deploying
+
+**After adding Redis or Ingress**:
+1. Update outputs section with new resource details
+2. Document connection strings in `docs/ARCHITECTURE.md` Section 13
+3. Update `deploy-aks.ps1` to configure kubectl/helm for new components
+4. Test complete deployment in isolated resource group
+
 ## Git Branch Strategy
 
 - `master` - Stable releases
@@ -268,7 +360,9 @@ When requirements are unclear:
 - TTS Documentation: https://www.thethingsindustries.com/docs/
 - Azure Bicep: https://docs.microsoft.com/azure/azure-resource-manager/bicep/
 - LoRaWAN Specification: https://lora-alliance.org/resource_hub/lorawan-specification-v1-0-3/
+- Kubernetes Documentation: https://kubernetes.io/docs/
+- AKS Best Practices: https://learn.microsoft.com/azure/aks/
 
 ---
 
-**Remember**: This codebase is production-ready with 7 critical fixes. Preserve these fixes in all modifications. When in doubt, reference `DEPLOYMENT_FIXES_SUMMARY.md`.
+**Remember**: This codebase is production-ready with 7 critical fixes. Preserve these fixes in all modifications. When in doubt, reference `DEPLOYMENT_FIXES_SUMMARY.md`. For AKS architecture details, see `docs/ARCHITECTURE.md` Section 13.
