@@ -207,15 +207,12 @@ Create `parameters.json` for repeatable deployments:
 Deploy:
 ```powershell
 # VM deployment with parameters file
-```powershell
 .\deployments\vm\deploy-simple.ps1 -ParametersFile "parameters.json"
-```
+
 
 # AKS deployment with parameters file
 .\deployments\kubernetes\deploy-aks.ps1 -ParametersFile "parameters.json"
 ```
-
----
 
 ### First Login
 
@@ -236,15 +233,16 @@ After deployment completes (~10 minutes):
    - Add application → Enter application ID
    - Register gateways and devices
 
+
 **📖 See**: [Post-Deployment Guide](#-post-deployment) for detailed setup steps
 
 ---
+
 
 ## 🏗️ Architecture
 
 ### High-Level Overview
 
-```
                                     ┌──────────────────────┐
                                     │   Public Internet    │
                                     └──────────┬───────────┘
@@ -292,7 +290,7 @@ After deployment completes (~10 minutes):
                        │  Vault         │          │  Log Analytics     │
                        │  (Secrets)     │          │  App Insights      │
                        └────────────────┘          └────────────────────┘
-```
+
 
 ### Component Breakdown
 
@@ -306,12 +304,13 @@ After deployment completes (~10 minutes):
 | **Security** | Key Vault, Managed Identity | Secrets management |
 | **Observability** | Monitor, Log Analytics | Logging and metrics |
 
+
 **📖 See**: 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Comprehensive architecture guide (2,500+ lines)
 - [docs/DEPLOYMENT_ORCHESTRATION.md](docs/DEPLOYMENT_ORCHESTRATION.md) - Deployment system details
 - [docs/CI-CD-ARCHITECTURE.md](docs/CI-CD-ARCHITECTURE.md) - CI/CD pipeline architecture
 
----
+
 
 ## 🔧 Deployment Options
 
