@@ -13,20 +13,23 @@
 
 ## 📑 Table of Contents
 
-- [Overview](#-overview)
-- [Quick Start](#-quick-start)
-- [Architecture](#-architecture)
-- [Deployment Options](#-deployment-options)
-- [What Gets Deployed](#-what-gets-deployed)
-- [Security Features](#-security-features)
-- [Post-Deployment](#-post-deployment)
-- [Operations Guide](#-operations-guide)
-- [Monitoring & Alerts](#-monitoring--alerts)
-- [Cost Estimation](#-cost-estimation)
-- [Troubleshooting](#-troubleshooting)
-- [Documentation](#-documentation)
-- [Contributing](#-contributing)
-- [Support](#-support)
+- [🎯 Overview](#-overview)
+- [🚀 Quick Start](#-quick-start)
+- [🏗️ Architecture](#️-architecture)
+- [🔧 Deployment Options](#-deployment-options)
+- [📦 What Gets Deployed](#-what-gets-deployed)
+- [🛡️ Security Features](#️-security-features)
+- [🎉 Post-Deployment](#-post-deployment)
+- [📊 Operations Guide](#-operations-guide)
+- [📈 Monitoring & Alerts](#-monitoring--alerts)
+- [💰 Cost Estimation](#-cost-estimation)
+- [🐛 Troubleshooting](#-troubleshooting)
+- [📚 Documentation](#-documentation)
+- [🤝 Contributing](#-contributing)
+- [🆘 Support](#-support)
+- [⚖️ License](#️-license)
+- [⚠️ Important Notices](#️-important-notices)
+- [🎯 Quick Reference Card](#-quick-reference-card)
 
 ---
 
@@ -57,6 +60,11 @@ This repository provides **Infrastructure as Code (IaC)** for deploying [The Thi
 | **Integrations** | HTTP webhooks, MQTT, gRPC APIs for application connectivity |
 | **Console** | Web-based management interface with OAuth 2.0 authentication |
 | **Scalability** | Vertical scaling (VM resize) or horizontal (AKS migration) |
+
+**📖 See**: 
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Complete architecture documentation
+- [Quick Start](#-quick-start) - Get started in minutes
+- [Deployment Options](#-deployment-options) - Choose your deployment mode
 
 ---
 
@@ -199,15 +207,12 @@ Create `parameters.json` for repeatable deployments:
 Deploy:
 ```powershell
 # VM deployment with parameters file
-```powershell
 .\deployments\vm\deploy-simple.ps1 -ParametersFile "parameters.json"
-```
+
 
 # AKS deployment with parameters file
 .\deployments\kubernetes\deploy-aks.ps1 -ParametersFile "parameters.json"
 ```
-
----
 
 ### First Login
 
@@ -228,15 +233,16 @@ After deployment completes (~10 minutes):
    - Add application → Enter application ID
    - Register gateways and devices
 
+
 **📖 See**: [Post-Deployment Guide](#-post-deployment) for detailed setup steps
 
 ---
+
 
 ## 🏗️ Architecture
 
 ### High-Level Overview
 
-```
                                     ┌──────────────────────┐
                                     │   Public Internet    │
                                     └──────────┬───────────┘
@@ -284,7 +290,7 @@ After deployment completes (~10 minutes):
                        │  Vault         │          │  Log Analytics     │
                        │  (Secrets)     │          │  App Insights      │
                        └────────────────┘          └────────────────────┘
-```
+
 
 ### Component Breakdown
 
@@ -298,9 +304,13 @@ After deployment completes (~10 minutes):
 | **Security** | Key Vault, Managed Identity | Secrets management |
 | **Observability** | Monitor, Log Analytics | Logging and metrics |
 
-**📖 See**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for comprehensive architecture documentation (2,500+ lines)
 
----
+**📖 See**: 
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Comprehensive architecture guide (2,500+ lines)
+- [docs/DEPLOYMENT_ORCHESTRATION.md](docs/DEPLOYMENT_ORCHESTRATION.md) - Deployment system details
+- [docs/CI-CD-ARCHITECTURE.md](docs/CI-CD-ARCHITECTURE.md) - CI/CD pipeline architecture
+
+
 
 ## 🔧 Deployment Options
 
@@ -385,6 +395,11 @@ bicep build deployments/kubernetes/tts-aks-deployment.bicep
 
 # Upload to Azure Portal → Deploy custom template
 ```
+
+**📖 See**: 
+- [docs/DEPLOYMENT-PARAMETERS-GUIDE.md](docs/DEPLOYMENT-PARAMETERS-GUIDE.md) - Complete parameter reference (27KB)
+- [docs/DEPLOYMENT_ORCHESTRATION.md](docs/DEPLOYMENT_ORCHESTRATION.md) - Orchestration system guide
+- [docs/CI-CD-SETUP-GUIDE.md](docs/CI-CD-SETUP-GUIDE.md) - CI/CD pipeline setup
 
 ---
 
@@ -490,9 +505,9 @@ This deployment includes **7 critical security fixes** identified during product
 | **#7** | **Admin password stdin bug** | **Use `--password` flag instead of printf** | ✅ **Fixed** |
 
 **📖 See**: 
-- [DEPLOYMENT_FIXES_SUMMARY.md](DEPLOYMENT_FIXES_SUMMARY.md) - All 7 fixes detailed
-- [SECURITY_FIX_SUMMARY.md](SECURITY_FIX_SUMMARY.md) - Security-specific fixes (#6, #7)
-- [LOGIN_FIX.md](LOGIN_FIX.md) - Admin authentication fix (#7)
+- [docs/DEPLOYMENT_FIXES_SUMMARY.md](docs/DEPLOYMENT_FIXES_SUMMARY.md) - All 7 fixes detailed
+- [docs/SECURITY_FIX_SUMMARY.md](docs/SECURITY_FIX_SUMMARY.md) - Security-specific fixes (#6, #7)
+- [docs/LOGIN_FIX.md](docs/LOGIN_FIX.md) - Admin authentication fix (#7)
 
 ---
 
@@ -562,7 +577,9 @@ VM Managed Identity → Key Vault (read secrets during cloud-init)
 TTS Container → Secrets injected into tts.yml
 ```
 
-**📖 See**: [SECURITY_HARDENING.md](SECURITY_HARDENING.md) for production security checklist
+**📖 See**: 
+- [docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md) - Production security checklist
+- [docs/ARCHITECTURE.md § Security Architecture](docs/ARCHITECTURE.md#7-security-architecture) - Threat model & compliance
 
 ---
 
@@ -1166,10 +1183,10 @@ WHERE state = 'idle in transaction' AND now() - query_start > interval '10 minut
 |----------|-------------|-------|
 | **[README.md](README.md)** | ⭐ This file - Quick start and overview | 800+ |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | 🏗️ Comprehensive architecture guide (13 sections, 10+ diagrams) | 2,500+ |
-| **[DEPLOYMENT_FIXES_SUMMARY.md](DEPLOYMENT_FIXES_SUMMARY.md)** | 🔧 All 7 critical fixes applied to deployment | 319 |
-| **[SECURITY_HARDENING.md](SECURITY_HARDENING.md)** | 🔐 Production security checklist and best practices | 530 |
-| **[SECURITY_FIX_SUMMARY.md](SECURITY_FIX_SUMMARY.md)** | 🛡️ Security-specific fixes (#6 SSH, #7 password) | 250 |
-| **[LOGIN_FIX.md](LOGIN_FIX.md)** | 🔑 Admin password authentication fix details | 82 |
+| **[docs/DEPLOYMENT_FIXES_SUMMARY.md](docs/DEPLOYMENT_FIXES_SUMMARY.md)** | 🔧 All 7 critical fixes applied to deployment | 319 |
+| **[docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md)** | 🔐 Production security checklist and best practices | 530 |
+| **[docs/SECURITY_FIX_SUMMARY.md](docs/SECURITY_FIX_SUMMARY.md)** | 🛡️ Security-specific fixes (#6 SSH, #7 password) | 250 |
+| **[docs/LOGIN_FIX.md](docs/LOGIN_FIX.md)** | 🔑 Admin password authentication fix details | 82 |
 
 ### Documentation Map
 
@@ -1193,16 +1210,16 @@ WHERE state = 'idle in transaction' AND now() - query_start > interval '10 minut
 │  │             │                                              │
 │  │             └─► Specialized Docs:                         │
 │  │                  │                                         │
-│  │                  ├─► DEPLOYMENT_FIXES_SUMMARY.md          │
+│  │                  ├─► docs/DEPLOYMENT_FIXES_SUMMARY.md     │
 │  │                  │    (If deployment issues)              │
 │  │                  │                                         │
-│  │                  ├─► SECURITY_HARDENING.md                │
+│  │                  ├─► docs/SECURITY_HARDENING.md           │
 │  │                  │    (Production checklist)              │
 │  │                  │                                         │
-│  │                  ├─► SECURITY_FIX_SUMMARY.md              │
+│  │                  ├─► docs/SECURITY_FIX_SUMMARY.md         │
 │  │                  │    (SSH & password fixes)              │
 │  │                  │                                         │
-│  │                  └─► LOGIN_FIX.md                         │
+│  │                  └─► docs/LOGIN_FIX.md                    │
 │  │                       (Admin login issues)                │
 │  │                                                            │
 └─────────────────────────────────────────────────────────────┘
@@ -1306,7 +1323,9 @@ Before going to production, ensure:
 - [ ] **Enable geo-redundant backups** for PostgreSQL
 - [ ] **Purchase Reserved Instances** for cost savings
 
-**📖 See**: [SECURITY_HARDENING.md](SECURITY_HARDENING.md) for complete checklist
+**📖 See**: 
+- [docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md) - Complete production checklist
+- [docs/ARCHITECTURE.md § Operations](docs/ARCHITECTURE.md#8-operations--maintenance) - Operational procedures
 
 ---
 
