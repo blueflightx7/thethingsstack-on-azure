@@ -571,9 +571,10 @@ try {
     Write-Host "  Current User ID: $currentUserId" -ForegroundColor Gray
     
     # Create Key Vault with purge protection and soft delete enabled (SFI compliance)
-    # Soft delete is automatically enabled when SoftDeleteRetentionInDays is specified
+    # Soft delete is automatically enabled (mandatory since Azure API 2020+)
     # Purge protection prevents permanent deletion during the retention period
-    Write-Host "  Enabling soft delete (90 days) and purge protection (SFI compliance)..." -ForegroundColor Cyan
+    # PublicNetworkAccess must be explicitly set for SFI compliance policy
+    Write-Host "  Enabling soft delete (90 days), purge protection, and public network access (SFI compliance)..." -ForegroundColor Cyan
     New-AzKeyVault `
         -Name $keyVaultName `
         -ResourceGroupName $ResourceGroupName `
@@ -581,7 +582,8 @@ try {
         -EnabledForTemplateDeployment `
         -EnabledForDeployment `
         -EnablePurgeProtection `
-        -SoftDeleteRetentionInDays 90 | Out-Null
+        -SoftDeleteRetentionInDays 90 `
+        -PublicNetworkAccess "Enabled" | Out-Null
     
     Write-Host "✓ Key Vault created with RBAC, soft delete, and purge protection" -ForegroundColor Green
     Write-Host "  Soft Delete: Enabled (90 days retention)" -ForegroundColor Gray
