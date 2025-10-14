@@ -64,6 +64,27 @@ param cookieBlockKey string = ''
 @secure()
 param oauthClientSecret string = ''
 
+@description('Use existing VNet instead of creating a new one')
+param useExistingVNet bool = false
+
+@description('Name of existing VNet (required if useExistingVNet is true)')
+param existingVNetName string = ''
+
+@description('Resource group containing the existing VNet (defaults to deployment RG if empty)')
+param existingVNetResourceGroup string = ''
+
+@description('Name of existing subnet in the VNet (required if useExistingVNet is true)')
+param existingSubnetName string = ''
+
+@description('Create a new subnet in the existing VNet')
+param createSubnetInExistingVNet bool = false
+
+@description('Name for new subnet to create in existing VNet')
+param newSubnetName string = 'tts-subnet'
+
+@description('Address prefix for new subnet (e.g., 10.0.5.0/24)')
+param newSubnetAddressPrefix string = '10.0.5.0/24'
+
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -71,8 +92,9 @@ param oauthClientSecret string = ''
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location)
 var vmName = '${environmentName}-vm-${resourceToken}'
 var nicName = '${vmName}-nic'
-var vnetName = '${environmentName}-vnet-${resourceToken}'
-var subnetName = 'default'
+var vnetName = useExistingVNet ? existingVNetName : '${environmentName}-vnet-${resourceToken}'
+var subnetName = useExistingVNet ? existingSubnetName : 'default'
+var vnetResourceGroup = useExistingVNet && !empty(existingVNetResourceGroup) ? existingVNetResourceGroup : resourceGroup().name
 var nsgName = '${environmentName}-nsg-${resourceToken}'
 var pipName = '${vmName}-pip'
 var dbServerName = '${environmentName}-db-${resourceToken}'
@@ -170,12 +192,16 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-04-01' = {
   }
 }
 
-resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
+// Reference to existing VNet (if using existing)
+resource existingVnet 'Microsoft.Network/virtualNetworks@2023-04-01' existing = if (useExistingVNet) {
+  name: vnetName
+  scope: resourceGroup(vnetResourceGroup)
+}
+
+// New VNet (only created if not using existing)
+resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = if (!useExistingVNet) {
   name: vnetName
   location: location
-  dependsOn: [
-    nsg
-  ]
   properties: {
     addressSpace: {
       addressPrefixes: [
@@ -244,10 +270,6 @@ resource pip 'Microsoft.Network/publicIPAddresses@2023-04-01' = {
 resource nic 'Microsoft.Network/networkInterfaces@2023-04-01' = {
   name: nicName
   location: location
-  dependsOn: [
-    pip
-    vnet
-  ]
   properties: {
     ipConfigurations: [
       {
@@ -258,7 +280,9 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-04-01' = {
             id: pip.id
           }
           subnet: {
-            id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)
+            id: useExistingVNet 
+              ? resourceId(vnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)
+              : resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)
           }
         }
       }
