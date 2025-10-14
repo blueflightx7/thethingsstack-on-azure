@@ -571,14 +571,15 @@ try {
     Write-Host "  Current User ID: $currentUserId" -ForegroundColor Gray
     
     # Create Key Vault with purge protection and soft delete enabled (SFI compliance)
-    Write-Host "  Enabling soft delete and purge protection (SFI compliance)..." -ForegroundColor Cyan
+    # Soft delete is automatically enabled when SoftDeleteRetentionInDays is specified
+    # Purge protection prevents permanent deletion during the retention period
+    Write-Host "  Enabling soft delete (90 days) and purge protection (SFI compliance)..." -ForegroundColor Cyan
     New-AzKeyVault `
         -Name $keyVaultName `
         -ResourceGroupName $ResourceGroupName `
         -Location $Location `
         -EnabledForTemplateDeployment `
         -EnabledForDeployment `
-        -EnableSoftDelete `
         -EnablePurgeProtection `
         -SoftDeleteRetentionInDays 90 | Out-Null
     
