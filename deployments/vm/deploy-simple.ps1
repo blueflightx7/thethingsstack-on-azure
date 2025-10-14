@@ -570,16 +570,21 @@ try {
     
     Write-Host "  Current User ID: $currentUserId" -ForegroundColor Gray
     
-    # Create Key Vault (RBAC is enabled by default)
+    # Create Key Vault with purge protection and soft delete enabled (SFI compliance)
+    Write-Host "  Enabling soft delete and purge protection (SFI compliance)..." -ForegroundColor Cyan
     New-AzKeyVault `
         -Name $keyVaultName `
         -ResourceGroupName $ResourceGroupName `
         -Location $Location `
         -EnabledForTemplateDeployment `
         -EnabledForDeployment `
-        -SoftDeleteRetentionInDays 7 | Out-Null
+        -EnableSoftDelete `
+        -EnablePurgeProtection `
+        -SoftDeleteRetentionInDays 90 | Out-Null
     
-    Write-Host "✓ Key Vault created with RBAC" -ForegroundColor Green
+    Write-Host "✓ Key Vault created with RBAC, soft delete, and purge protection" -ForegroundColor Green
+    Write-Host "  Soft Delete: Enabled (90 days retention)" -ForegroundColor Gray
+    Write-Host "  Purge Protection: Enabled (prevents permanent deletion)" -ForegroundColor Gray
     
     # Assign Key Vault Secrets Officer role to current user
     Write-Host "Assigning Key Vault Secrets Officer role..." -ForegroundColor Cyan
