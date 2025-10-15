@@ -484,13 +484,126 @@ if ([string]::IsNullOrEmpty($VNetName)) {
 
 if ($createNewVNet) {
     Write-Host "✓ New VNet and Subnet will be created automatically by Bicep template" -ForegroundColor Green
+    Write-Host "✓ Database subnet with PostgreSQL delegation will be created" -ForegroundColor Green
 } else {
+    # ========================================================================
+    # SELECT DATABASE SUBNET FOR POSTGRESQL (MUST BE DELEGATED)
+    # ========================================================================
+    
+    Write-Host "`n  📊 Database Subnet Selection (PostgreSQL Private Access)" -ForegroundColor Cyan
+    Write-Host "  ⚠️  PostgreSQL Flexible Server requires a delegated subnet" -ForegroundColor Yellow
+    Write-Host "  Delegation: Microsoft.DBforPostgreSQL/flexibleServers`n" -ForegroundColor Gray
+    
+    # Get fresh VNet info to see all subnets
+    $selectedVNet = Get-AzVirtualNetwork -Name $VNetName -ResourceGroupName $vnetResourceGroup
+    
+    # Find subnets with PostgreSQL delegation
+    $delegatedSubnets = $selectedVNet.Subnets | Where-Object {
+        $_.Delegations.Count -gt 0 -and 
+        $_.Delegations[0].ServiceName -eq 'Microsoft.DBforPostgreSQL/flexibleServers'
+    }
+    
+    if ($delegatedSubnets.Count -gt 0) {
+        Write-Host "  Found $($delegatedSubnets.Count) subnet(s) with PostgreSQL delegation:" -ForegroundColor Green
+        for ($i = 0; $i -lt $delegatedSubnets.Count; $i++) {
+            $dbSubnet = $delegatedSubnets[$i]
+            Write-Host "    $($i + 1). $($dbSubnet.Name) - $($dbSubnet.AddressPrefix)" -ForegroundColor White
+            Write-Host "       ✓ Delegated to: Microsoft.DBforPostgreSQL/flexibleServers" -ForegroundColor Green
+        }
+        
+        if ($delegatedSubnets.Count -eq 1) {
+            $DatabaseSubnetName = $delegatedSubnets[0].Name
+            Write-Host "`n  ✓ Auto-selected: $DatabaseSubnetName" -ForegroundColor Green
+        } else {
+            $dbSubnetChoice = Read-Host "`n  Select Database Subnet (1-$($delegatedSubnets.Count))"
+            if ($dbSubnetChoice -and $dbSubnetChoice -match '^\d+$' -and [int]$dbSubnetChoice -le $delegatedSubnets.Count -and [int]$dbSubnetChoice -gt 0) {
+                $DatabaseSubnetName = $delegatedSubnets[[int]$dbSubnetChoice - 1].Name
+                Write-Host "  ✓ Selected: $DatabaseSubnetName" -ForegroundColor Green
+            } else {
+                Write-Error "Invalid selection"
+                exit 1
+            }
+        }
+    } else {
+        Write-Host "  ⚠️  No subnets found with PostgreSQL delegation!" -ForegroundColor Red
+        Write-Host "`n  Available options:" -ForegroundColor Cyan
+        Write-Host "    1. Delegate an existing subnet" -ForegroundColor White
+        Write-Host "    2. Switch to public database access (not recommended for production)" -ForegroundColor White
+        
+        $delegationChoice = Read-Host "`n  Select option (1-2)"
+        
+        if ($delegationChoice -eq "1") {
+            # Show non-delegated subnets
+            $availableSubnets = $selectedVNet.Subnets | Where-Object {
+                $_.Delegations.Count -eq 0 -and $_.Name -ne $SubnetName
+            }
+            
+            if ($availableSubnets.Count -eq 0) {
+                Write-Host "`n  No available subnets to delegate. Creating new subnet for database..." -ForegroundColor Yellow
+                $DatabaseSubnetName = "database-subnet"
+                Write-Host "  ⚠️  You'll need to manually create subnet '$DatabaseSubnetName' with PostgreSQL delegation" -ForegroundColor Yellow
+                Write-Host "  Or deployment will fail. Continue? (y/N)" -ForegroundColor Red
+                $continue = Read-Host
+                if ($continue -ne 'y' -and $continue -ne 'Y') {
+                    exit 1
+                }
+            } else {
+                Write-Host "`n  Available subnets (not delegated):" -ForegroundColor Cyan
+                for ($i = 0; $i -lt $availableSubnets.Count; $i++) {
+                    Write-Host "    $($i + 1). $($availableSubnets[$i].Name) - $($availableSubnets[$i].AddressPrefix)" -ForegroundColor White
+                }
+                
+                $subnetToDelegate = Read-Host "`n  Select subnet to delegate to PostgreSQL (1-$($availableSubnets.Count))"
+                
+                if ($subnetToDelegate -and $subnetToDelegate -match '^\d+$' -and [int]$subnetToDelegate -le $availableSubnets.Count -and [int]$subnetToDelegate -gt 0) {
+                    $targetSubnet = $availableSubnets[[int]$subnetToDelegate - 1]
+                    $DatabaseSubnetName = $targetSubnet.Name
+                    
+                    Write-Host "`n  Configuring delegation on subnet: $DatabaseSubnetName..." -ForegroundColor Cyan
+                    
+                    # Add delegation
+                    $targetSubnet.Delegations.Add(
+                        (New-Object Microsoft.Azure.Commands.Network.Models.PSDelegation -Property @{
+                            Name = "PostgreSQLFlexibleServer"
+                            ServiceName = "Microsoft.DBforPostgreSQL/flexibleServers"
+                        })
+                    )
+                    
+                    try {
+                        Set-AzVirtualNetwork -VirtualNetwork $selectedVNet | Out-Null
+                        Write-Host "  ✓ Delegation configured successfully!" -ForegroundColor Green
+                    } catch {
+                        Write-Error "Failed to configure delegation: $_"
+                        exit 1
+                    }
+                } else {
+                    Write-Error "Invalid selection"
+                    exit 1
+                }
+            }
+        } elseif ($delegationChoice -eq "2") {
+            Write-Host "`n  ⚠️  Switching to PUBLIC database access" -ForegroundColor Yellow
+            Write-Host "  Database will be accessible via public endpoint with firewall rules" -ForegroundColor Yellow
+            $enablePrivateDatabaseAccess = $false
+            $DatabaseSubnetName = "" # Not needed for public access
+        } else {
+            Write-Error "Invalid selection"
+            exit 1
+        }
+    }
+    
     Write-Host "`nNetwork Configuration Summary:" -ForegroundColor Cyan
     Write-Host "  VNet: $VNetName" -ForegroundColor White
     Write-Host "  VNet Resource Group: $vnetResourceGroup" -ForegroundColor White
-    Write-Host "  Subnet: $SubnetName" -ForegroundColor White
+    Write-Host "  VM Subnet: $SubnetName" -ForegroundColor White
     if ($selectedSubnet) {
-        Write-Host "  Subnet Address: $($selectedSubnet.AddressPrefix)" -ForegroundColor Gray
+        Write-Host "    Address: $($selectedSubnet.AddressPrefix)" -ForegroundColor Gray
+    }
+    if ($DatabaseSubnetName) {
+        Write-Host "  Database Subnet: $DatabaseSubnetName" -ForegroundColor White
+        Write-Host "    Delegation: Microsoft.DBforPostgreSQL/flexibleServers" -ForegroundColor Green
+    } else {
+        Write-Host "  Database Access: Public (with firewall rules)" -ForegroundColor Yellow
     }
 }
 
@@ -711,8 +824,8 @@ $deploymentParams = @{
     cookieHashKey         = $cookieHashKey
     cookieBlockKey        = $cookieBlockKey
     oauthClientSecret     = (ConvertTo-SecureString -String $oauthClientSecret -AsPlainText -Force)
-    enableKeyVault        = $true
-    enablePrivateDatabaseAccess = $true
+    enableKeyVault        = $true  # PowerShell creates the vault, Bicep references it and creates secrets
+    enablePrivateDatabaseAccess = if ($createNewVNet) { $true } else { if ($DatabaseSubnetName) { $true } else { $false } }
     enableMonitoring      = $false  # Disabled to avoid policy restrictions on Log Analytics
     Verbose               = $true
 }
@@ -725,6 +838,11 @@ if (-not $createNewVNet) {
         $deploymentParams.existingVNetName = $VNetName
         $deploymentParams.existingVNetResourceGroup = $vnetResourceGroup
         $deploymentParams.existingSubnetName = $SubnetName
+        
+        # Add database subnet if provided
+        if ($DatabaseSubnetName) {
+            $deploymentParams.existingDatabaseSubnetName = $DatabaseSubnetName
+        }
     } else {
         # Create new subnet in existing VNet
         $deploymentParams.useExistingVNet = $true
@@ -732,6 +850,11 @@ if (-not $createNewVNet) {
         $deploymentParams.existingVNetResourceGroup = $vnetResourceGroup
         $deploymentParams.createSubnetInExistingVNet = $true
         $deploymentParams.newSubnetName = $SubnetName
+        
+        # Add database subnet if provided
+        if ($DatabaseSubnetName) {
+            $deploymentParams.existingDatabaseSubnetName = $DatabaseSubnetName
+        }
     }
 }
 

@@ -79,6 +79,9 @@ param existingVNetResourceGroup string = ''
 @description('Name of existing subnet in the VNet (required if useExistingVNet is true)')
 param existingSubnetName string = ''
 
+@description('Name of existing database subnet with PostgreSQL delegation (required if useExistingVNet is true)')
+param existingDatabaseSubnetName string = ''
+
 @description('Create a new subnet in the existing VNet')
 param createSubnetInExistingVNet bool = false
 
@@ -97,6 +100,7 @@ var vmName = '${environmentName}-vm-${resourceToken}'
 var nicName = '${vmName}-nic'
 var vnetName = useExistingVNet ? existingVNetName : '${environmentName}-vnet-${resourceToken}'
 var subnetName = useExistingVNet ? existingSubnetName : 'default'
+var databaseSubnetName = useExistingVNet ? existingDatabaseSubnetName : 'database-subnet'
 var vnetResourceGroup = useExistingVNet && !empty(existingVNetResourceGroup) ? existingVNetResourceGroup : resourceGroup().name
 var nsgName = '${environmentName}-nsg-${resourceToken}'
 var pipName = '${vmName}-pip'
@@ -251,7 +255,9 @@ resource privateDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLin
   properties: {
     registrationEnabled: false
     virtualNetwork: {
-      id: vnet.id
+      id: useExistingVNet 
+        ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks', vnetName)
+        : vnet.id
     }
   }
 }
@@ -284,7 +290,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-04-01' = {
           }
           subnet: {
             id: useExistingVNet 
-              ? resourceId(vnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)
+              ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)
               : resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)
           }
         }
@@ -318,7 +324,9 @@ resource dbServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview'
       storageSizeGB: 32
     }
     network: enablePrivateDatabaseAccess ? {
-      delegatedSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'database-subnet')
+      delegatedSubnetResourceId: useExistingVNet 
+        ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', vnetName, databaseSubnetName)
+        : resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, databaseSubnetName)
       privateDnsZoneArmResourceId: privateDnsZone.id
       publicNetworkAccess: 'Disabled'
     } : {
@@ -404,27 +412,11 @@ resource securityAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = if (e
 // KEY VAULT
 // ============================================================================
 
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = if (enableKeyVault) {
+// Reference existing Key Vault created by PowerShell script
+// The deploy-simple.ps1 script creates the Key Vault with proper settings
+// before running this Bicep template, so we just reference it here
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = if (enableKeyVault) {
   name: keyVaultName
-  location: location
-  properties: {
-    sku: {
-      family: 'A'
-      name: 'standard'
-    }
-    tenantId: subscription().tenantId
-    enabledForTemplateDeployment: true
-    enabledForDeployment: true
-    enabledForDiskEncryption: true
-    enableRbacAuthorization: true
-    enableSoftDelete: true
-    softDeleteRetentionInDays: 7
-    publicNetworkAccess: 'Enabled'
-    networkAcls: {
-      defaultAction: 'Allow'
-      bypass: 'AzureServices'
-    }
-  }
 }
 
 resource dbPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (enableKeyVault) {
@@ -526,10 +518,6 @@ resource firewallRule 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2
 resource vm 'Microsoft.Compute/virtualMachines@2023-03-01' = {
   name: vmName
   location: location
-  dependsOn: [
-    dbServer
-    nic
-  ]
   identity: enableKeyVault ? {
     type: 'SystemAssigned'
   } : null
