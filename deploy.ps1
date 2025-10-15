@@ -6,7 +6,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet("", "vm", "aks", "quick")]
+    [ValidateSet("", "vm", "aks", "quick", "monitoring")]
     [string]$Mode = "",
     
     [Parameter(Mandatory=$false)]
@@ -65,7 +65,12 @@ function Show-DeploymentMenu {
     Write-Host "      • Cost: Varies based on configuration" -ForegroundColor Gray
     Write-Host "      • Deployment time: 15-20 minutes`n" -ForegroundColor Gray
     
-    Write-Host "  [4] Compare All Deployment Options" -ForegroundColor Magenta
+    Write-Host "  [4] Add Monitoring to Existing Deployment" -ForegroundColor Yellow
+    Write-Host "      • Log Analytics + Application Insights" -ForegroundColor Gray
+    Write-Host "      • Add monitoring after initial deployment" -ForegroundColor Gray
+    Write-Host "      • Use existing or create new components`n" -ForegroundColor Gray
+    
+    Write-Host "  [5] Compare All Deployment Options" -ForegroundColor Magenta
     Write-Host "      • View detailed comparison matrix`n" -ForegroundColor Gray
     
     Write-Host "  [Q] Quit`n" -ForegroundColor DarkGray
@@ -146,7 +151,7 @@ if ([string]::IsNullOrEmpty($Mode)) {
         
         Show-DeploymentMenu
         
-        $choice = Read-Host "Select deployment mode [1-4, Q]"
+        $choice = Read-Host "Select deployment mode [1-5, Q]"
         
         switch ($choice.ToUpper()) {
             "1" { 
@@ -162,6 +167,10 @@ if ([string]::IsNullOrEmpty($Mode)) {
                 break
             }
             "4" { 
+                $Mode = "monitoring"
+                break
+            }
+            "5" { 
                 Show-ComparisonMatrix
             }
             "Q" {
@@ -516,9 +525,53 @@ SSH Source IP: $AdminSourceIP
         }
     }
     
+    "monitoring" {
+        Write-Host "📊 Starting Monitoring Add-On Deployment..." -ForegroundColor Yellow
+        Write-Host "   Using: deployments/vm/deploy-monitoring.ps1`n" -ForegroundColor Gray
+        
+        # Check if monitoring deployment script exists
+        $monitoringScript = "$PSScriptRoot\deployments\vm\deploy-monitoring.ps1"
+        if (-not (Test-Path $monitoringScript)) {
+            Write-Host "❌ Error: Monitoring deployment script not found" -ForegroundColor Red
+            Write-Host "   Expected: $monitoringScript`n" -ForegroundColor Red
+            exit 1
+        }
+        
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+        Write-Host "  MONITORING ADD-ON DEPLOYMENT" -ForegroundColor Yellow
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
+        
+        Write-Host "This will add monitoring to an existing TTS deployment:" -ForegroundColor Cyan
+        Write-Host "  • Log Analytics Workspace (logs aggregation)" -ForegroundColor White
+        Write-Host "  • Application Insights (application monitoring)" -ForegroundColor White
+        Write-Host "  • Security Alerts (security event monitoring)`n" -ForegroundColor White
+        
+        Write-Host "You can choose to:" -ForegroundColor Cyan
+        Write-Host "  • Create new monitoring resources" -ForegroundColor Gray
+        Write-Host "  • Use existing Log Analytics Workspace" -ForegroundColor Gray
+        Write-Host "  • Use existing Application Insights" -ForegroundColor Gray
+        Write-Host "  • Mix existing and new components`n" -ForegroundColor Gray
+        
+        $confirm = Read-Host "Continue? (Y/n)"
+        if ($confirm -eq 'n' -or $confirm -eq 'N') {
+            Write-Host "Monitoring deployment cancelled" -ForegroundColor Yellow
+            exit 0
+        }
+        
+        # Prepare parameters
+        $params = @{}
+        
+        if ($EnvironmentName -and $EnvironmentName -ne "ttsprod") { 
+            $params.EnvironmentName = $EnvironmentName 
+        }
+        
+        # Execute monitoring deployment
+        & $monitoringScript @params
+    }
+    
     default {
         Write-Host "❌ Invalid deployment mode: $Mode" -ForegroundColor Red
-        Write-Host "   Valid modes: quick, aks, vm" -ForegroundColor Yellow
+        Write-Host "   Valid modes: quick, aks, vm, monitoring" -ForegroundColor Yellow
         exit 1
     }
 }
