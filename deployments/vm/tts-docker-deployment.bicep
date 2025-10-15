@@ -50,6 +50,9 @@ param enablePrivateDatabaseAccess bool = true
 @description('Enable Key Vault for secrets management (recommended for production)')
 param enableKeyVault bool = true
 
+@description('Enable Log Analytics monitoring (may be blocked by policy in some subscriptions)')
+param enableMonitoring bool = true
+
 @description('TTS admin password for console access')
 @secure()
 param ttsAdminPasswordParam string
@@ -341,7 +344,7 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-06-0
 // MONITORING
 // ============================================================================
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (enableMonitoring) {
   name: '${environmentName}-logs'
   location: location
   tags: {
@@ -358,23 +361,20 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (enableMonitoring) {
   name: '${environmentName}-appinsights'
   location: location
-  dependsOn: [
-    logAnalytics
-  ]
   tags: {
     'azd-env-name': environmentName
   }
   kind: 'web'
   properties: {
     Application_Type: 'web'
-    WorkspaceResourceId: logAnalytics.id
+    WorkspaceResourceId: enableMonitoring ? logAnalytics.id : ''
   }
 }
 
-resource securityAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = {
+resource securityAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = if (enableMonitoring) {
   name: '${environmentName}-security-alert'
   location: 'Global'
   tags: {
@@ -865,11 +865,15 @@ output adminCredentials object = {
   consoleUrl: 'https://${actualDomainName}/console'
 }
 output quickStartGuide string = 'SSH to ${pip.properties.ipAddress} and run: docker logs ${adminUsername}_stack_1 -f to monitor deployment progress'
-output logAnalyticsWorkspaceId string = logAnalytics.id
-output applicationInsightsInstrumentationKey string = appInsights.properties.InstrumentationKey
-output applicationInsightsConnectionString string = appInsights.properties.ConnectionString
-output securityMonitoring object = {
+output logAnalyticsWorkspaceId string = enableMonitoring ? logAnalytics.id : ''
+output applicationInsightsInstrumentationKey string = enableMonitoring ? appInsights!.properties.InstrumentationKey : ''
+output applicationInsightsConnectionString string = enableMonitoring ? appInsights!.properties.ConnectionString : ''
+output securityMonitoring object = enableMonitoring ? {
   logAnalyticsWorkspace: logAnalytics.name
   applicationInsights: appInsights.name
   securityAlert: securityAlert.name
+} : {
+  logAnalyticsWorkspace: 'Monitoring disabled'
+  applicationInsights: 'Monitoring disabled'
+  securityAlert: 'Monitoring disabled'
 }

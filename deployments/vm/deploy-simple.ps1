@@ -713,6 +713,7 @@ $deploymentParams = @{
     oauthClientSecret     = (ConvertTo-SecureString -String $oauthClientSecret -AsPlainText -Force)
     enableKeyVault        = $true
     enablePrivateDatabaseAccess = $true
+    enableMonitoring      = $false  # Disabled to avoid policy restrictions on Log Analytics
     Verbose               = $true
 }
 
