@@ -128,6 +128,11 @@ var actualCookieHashKey = empty(cookieHashKey) ? toUpper(take(replace(replace(un
 var actualCookieBlockKey = empty(cookieBlockKey) ? toUpper(take(replace(replace(uniqueString(resourceGroup().id, 'block', deployment().name), '-', ''), '_', ''), 64)) : cookieBlockKey
 var actualOauthSecret = empty(oauthClientSecret) ? 'console' : oauthClientSecret
 
+// Target VNet resource ID - handles both greenfield (new VNet) and brownfield (existing VNet in different RG)
+var targetVnetResourceId = useExistingVNet 
+  ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks', vnetName)
+  : resourceId('Microsoft.Network/virtualNetworks', vnetName)
+
 // ============================================================================
 // NETWORKING
 // ============================================================================
@@ -263,12 +268,13 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = if (!useExistingV
   }
 }
 
+// Private DNS zone - always create in deployment RG (deleted with RG cleanup)
 resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = if (enablePrivateDatabaseAccess) {
   name: 'privatelink.postgres.database.azure.com'
   location: 'global'
 }
 
-// Create VNet link for private DNS resolution (required for private database access)
+// VNet link - works for both greenfield and brownfield (cross-RG VNet)
 resource privateDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = if (enablePrivateDatabaseAccess) {
   parent: privateDnsZone
   name: '${vnetName}-link'
@@ -276,9 +282,7 @@ resource privateDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLin
   properties: {
     registrationEnabled: false
     virtualNetwork: {
-      id: useExistingVNet 
-        ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks', vnetName)
-        : vnet.id
+      id: targetVnetResourceId
     }
   }
 }
@@ -346,7 +350,7 @@ resource dbServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview'
     }
     network: enablePrivateDatabaseAccess ? {
       delegatedSubnetResourceId: useExistingVNet 
-        ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', vnetName, databaseSubnetName)
+        ? '${resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks', vnetName)}/subnets/${databaseSubnetName}'
         : resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, databaseSubnetName)
       privateDnsZoneArmResourceId: privateDnsZone.id
       publicNetworkAccess: 'Disabled'
