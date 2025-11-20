@@ -110,7 +110,10 @@ var pipName = '${vmName}-pip'
 var dbServerName = '${environmentName}-db-${resourceToken}'
 
 // DNS and Domain configuration
-var actualDnsPrefix = empty(dnsNamePrefix) ? '${environmentName}-${resourceToken}' : dnsNamePrefix
+// DNS prefix for public IP (lowercase, no dots)
+var defaultDnsPrefix = '${environmentName}-${resourceToken}'
+var actualDnsPrefix = empty(dnsNamePrefix) ? defaultDnsPrefix : dnsNamePrefix
+// Domain name for TTS (can include dots)
 var actualDomainName = empty(domainName) ? '${actualDnsPrefix}.${location}.cloudapp.azure.com' : domainName
 
 // FIX #1: Generate alphanumeric-only password for PostgreSQL
@@ -298,6 +301,9 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-04-01' = {
   name: nicName
   location: location
   properties: {
+    networkSecurityGroup: {
+      id: nsg.id
+    }
     ipConfigurations: [
       {
         name: 'ipconfig1'

@@ -1006,7 +1006,9 @@ if ($DomainName) {
 Write-Host "`nThis will take 15-20 minutes...`n" -ForegroundColor Yellow
 
 try {
-    $deployment = New-AzResourceGroupDeployment @deploymentParams
+    # Enable detailed error output
+    $ErrorActionPreference = "Stop"
+    $deployment = New-AzResourceGroupDeployment @deploymentParams -ErrorVariable deployError
     
     Write-Host "`n╔══════════════════════════════════════════════════════════╗" -ForegroundColor Green
     Write-Host "║              Deployment Complete!                        ║" -ForegroundColor Green
@@ -1044,6 +1046,32 @@ try {
 catch {
     Write-Host "`n✗ Deployment failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    
+    # Show detailed error information
+    Write-Host "`n=== FULL ERROR DETAILS ===" -ForegroundColor Yellow
+    Write-Host ($_ | Format-List * -Force | Out-String) -ForegroundColor Red
+    
+    if ($_.ErrorDetails) {
+        Write-Host "`n=== ERROR DETAILS JSON ===" -ForegroundColor Yellow
+        Write-Host $_.ErrorDetails.Message -ForegroundColor Red
+    }
+    
+    # Show exception details
+    if ($_.Exception) {
+        Write-Host "`n=== EXCEPTION DETAILS ===" -ForegroundColor Yellow
+        $exception = $_.Exception
+        while ($exception) {
+            Write-Host "Type: $($exception.GetType().FullName)" -ForegroundColor Red
+            Write-Host "Message: $($exception.Message)" -ForegroundColor Red
+            if ($exception.InnerException) {
+                Write-Host "`n--- Inner Exception ---" -ForegroundColor Yellow
+                $exception = $exception.InnerException
+            } else {
+                $exception = $null
+            }
+        }
+    }
+    
     exit 1
 }
 
