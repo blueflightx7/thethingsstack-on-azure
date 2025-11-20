@@ -761,31 +761,12 @@ runcmd:
     
     # Obtain certificate using standalone mode (runs temporary web server on port 80)
     echo "Obtaining Let's Encrypt certificate for {1}..."
+    certbot certonly --standalone --non-interactive --agree-tos --email {8} -d {1} --http-01-port 80 \
+      --pre-hook "systemctl stop docker || true" \
+      --post-hook "systemctl start docker || true"
     
-    # Stop docker to free port 80
-    systemctl stop docker || true
-    sleep 5
-    
-    # Try Let's Encrypt with retries (waits for NSG propagation)
-    CERT_SUCCESS=0
-    for attempt in $(seq 1 5); do
-      echo "Let's Encrypt attempt $attempt/5 (waiting for network security rules to propagate)..."
-      if certbot certonly --standalone --non-interactive --agree-tos --email {8} -d {1} --http-01-port 80; then
-        CERT_SUCCESS=1
-        break
-      fi
-      if [ $attempt -lt 5 ]; then
-        echo "Let's Encrypt attempt $attempt failed, waiting 60 seconds for NSG rules to take effect..."
-        sleep 60
-      fi
-    done
-    
-    # Start docker back up
-    systemctl start docker || true
-    sleep 5
-    
-    # Copy Let's Encrypt certificates - must succeed
-    if [ $CERT_SUCCESS -eq 1 ] && [ -f /etc/letsencrypt/live/{1}/fullchain.pem ]; then
+    # Copy Let's Encrypt certificates
+    if [ -f /etc/letsencrypt/live/{1}/fullchain.pem ]; then
       cp /etc/letsencrypt/live/{1}/fullchain.pem /home/{0}/certs/cert.pem
       cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem
       chown {0}:{0} /home/{0}/certs/*
@@ -794,22 +775,10 @@ runcmd:
       echo "✅ Let's Encrypt certificate installed"
       
       # Setup auto-renewal
-      echo "0 0,12 * * * root certbot renew --quiet --pre-hook 'systemctl stop docker' --post-hook 'systemctl start docker; sleep 5; cp /etc/letsencrypt/live/{1}/fullchain.pem /home/{0}/certs/cert.pem && cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem && chown {0}:{0} /home/{0}/certs/* && cd /home/{0} && docker-compose restart stack'" > /etc/cron.d/certbot-renew
+      echo "0 0,12 * * * root certbot renew --quiet --deploy-hook 'cp /etc/letsencrypt/live/{1}/fullchain.pem /home/{0}/certs/cert.pem && cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem && chown {0}:{0} /home/{0}/certs/* && chmod 644 /home/{0}/certs/cert.pem && chmod 644 /home/{0}/certs/key.pem && cd /home/{0} && docker-compose restart stack'" > /etc/cron.d/certbot-renew
       echo "✅ Auto-renewal configured (runs twice daily)"
     else
-      echo "❌ Let's Encrypt certificate generation failed after 5 attempts!"
-      echo "This usually means:"
-      echo "  1. DNS is not pointing to this server ({7})"
-      echo "  2. Port 80 is blocked by firewall"
-      echo "  3. Network security rules haven't propagated yet"
-      echo ""
-      echo "TTS deployment will continue, but you must fix certificates manually:"
-      echo "  ssh {0}@{7}"
-      echo "  sudo certbot certonly --standalone -d {1} --http-01-port 80"
-      echo "  sudo cp /etc/letsencrypt/live/{1}/fullchain.pem /home/{0}/certs/cert.pem"
-      echo "  sudo cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem"
-      echo "  sudo chown {0}:{0} /home/{0}/certs/*"
-      echo "  cd /home/{0} && docker-compose restart stack"
+      echo "⚠️ Let's Encrypt certificate generation failed - TTS will continue without valid certificates"
     fi
   
   # Add user to docker group
