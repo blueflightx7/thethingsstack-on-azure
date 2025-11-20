@@ -35,6 +35,9 @@ param vmSize string = 'Standard_B4ms'
 @description('Domain name for TTS (will be auto-generated if not provided)')
 param domainName string = ''
 
+@description('DNS name prefix for Azure public IP (will be auto-generated if not provided)')
+param dnsNamePrefix string = ''
+
 @description('Name of existing Key Vault containing secrets (optional)')
 param keyVaultName string = ''
 
@@ -106,8 +109,9 @@ var nsgName = '${environmentName}-nsg-${resourceToken}'
 var pipName = '${vmName}-pip'
 var dbServerName = '${environmentName}-db-${resourceToken}'
 
-// Domain configuration
-var actualDomainName = empty(domainName) ? '${environmentName}-${resourceToken}.${location}.cloudapp.azure.com' : domainName
+// DNS and Domain configuration
+var actualDnsPrefix = empty(dnsNamePrefix) ? '${environmentName}-${resourceToken}' : dnsNamePrefix
+var actualDomainName = empty(domainName) ? '${actualDnsPrefix}.${location}.cloudapp.azure.com' : domainName
 
 // FIX #1: Generate alphanumeric-only password for PostgreSQL
 var dbPassword = replace(replace(replace(adminPassword, '!', ''), '@', ''), '#', '')
@@ -192,6 +196,19 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-04-01' = {
           sourceAddressPrefix: '*'
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
+          destinationPortRange: '1881-1887'
+        }
+      }
+      {
+        name: 'AllowClusterGRPC'
+        properties: {
+          priority: 1005
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
           destinationPortRange: '8884'
         }
       }
@@ -248,6 +265,7 @@ resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = if (ena
   location: 'global'
 }
 
+// Create VNet link for private DNS resolution (required for private database access)
 resource privateDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = if (enablePrivateDatabaseAccess) {
   parent: privateDnsZone
   name: '${vnetName}-link'
@@ -271,7 +289,7 @@ resource pip 'Microsoft.Network/publicIPAddresses@2023-04-01' = {
   properties: {
     publicIPAllocationMethod: 'Static'
     dnsSettings: {
-      domainNameLabel: '${environmentName}-${resourceToken}'
+      domainNameLabel: actualDnsPrefix
     }
   }
 }
@@ -306,10 +324,7 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-04-01' = {
 resource dbServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview' = {
   name: dbServerName
   location: location
-  dependsOn: [
-    privateDnsZone
-    privateDnsZoneLink
-  ]
+  // Implicit dependency through privateDnsZone.id reference (line 328)
   sku: {
     name: 'Standard_B1ms'
     tier: 'Burstable'

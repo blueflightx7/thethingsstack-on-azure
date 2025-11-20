@@ -82,6 +82,14 @@ if ([string]::IsNullOrEmpty($DomainName)) {
     $DomainName = Read-Host
 }
 
+# Prompt for DNS name prefix if custom domain not provided
+$DnsNamePrefix = ""
+if ([string]::IsNullOrEmpty($DomainName)) {
+    Write-Host "`nDNS name prefix for Azure public IP (leave empty for auto-generated):" -ForegroundColor Yellow
+    Write-Host "  Example: 'my-tts' will create 'my-tts.eastus.cloudapp.azure.com'" -ForegroundColor Gray
+    $DnsNamePrefix = Read-Host
+}
+
 # Prompt for passwords securely
 Write-Host "`nEnter VM/Database admin password (alphanumeric only, 12+ chars):" -ForegroundColor Yellow
 $vmAdminPassword = Read-Host -AsSecureString
@@ -269,6 +277,14 @@ if ([string]::IsNullOrEmpty($VNetName)) {
                 Write-Host "✓ Found VNet: $VNetName in $vnetResourceGroup" -ForegroundColor Green
                 Write-Host "  Address Space: $($selectedVNet.AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor Gray
                 
+                # CRITICAL: Update location to match VNet's location
+                $vnetLocation = $selectedVNet.Location
+                if ($Location -ne $vnetLocation) {
+                    Write-Host "  ⚠ VNet is in region: $vnetLocation" -ForegroundColor Yellow
+                    Write-Host "  Deployment location changed from $Location to $vnetLocation (resources must be in same region as VNet)" -ForegroundColor Yellow
+                    $Location = $vnetLocation
+                }
+                
                 # Get subnet
                 if ($selectedVNet.Subnets.Count -eq 0) {
                     Write-Host "  No subnets found in VNet" -ForegroundColor Yellow
@@ -362,6 +378,14 @@ if ([string]::IsNullOrEmpty($VNetName)) {
                     $vnetResourceId = $selectedVNet.Id
                     $vnetResourceGroup = $ResourceGroupName
                     
+                    # CRITICAL: Update location to match VNet's location
+                    $vnetLocation = $selectedVNet.Location
+                    if ($Location -ne $vnetLocation) {
+                        Write-Host "  ⚠ VNet is in region: $vnetLocation" -ForegroundColor Yellow
+                        Write-Host "  Deployment location changed from $Location to $vnetLocation (resources must be in same region as VNet)" -ForegroundColor Yellow
+                        $Location = $vnetLocation
+                    }
+                    
                     # Continue to subnet selection (reuse logic from option 1)
                     if ($selectedVNet.Subnets.Count -eq 0) {
                         Write-Host "  No subnets in VNet. New subnet will be created." -ForegroundColor Yellow
@@ -432,6 +456,14 @@ if ([string]::IsNullOrEmpty($VNetName)) {
                     
                     if ($vnetResourceGroup -ne $ResourceGroupName) {
                         Write-Host "  ℹ VNet is in different resource group: $vnetResourceGroup" -ForegroundColor Yellow
+                    }
+                    
+                    # CRITICAL: Update location to match VNet's location
+                    $vnetLocation = $selectedVNet.Location
+                    if ($Location -ne $vnetLocation) {
+                        Write-Host "  ⚠ VNet is in region: $vnetLocation" -ForegroundColor Yellow
+                        Write-Host "  Deployment location changed from $Location to $vnetLocation (resources must be in same region as VNet)" -ForegroundColor Yellow
+                        $Location = $vnetLocation
                     }
                     
                     # Subnet selection (same logic as above)
@@ -559,22 +591,106 @@ if ($createNewVNet) {
                     $targetSubnet = $availableSubnets[[int]$subnetToDelegate - 1]
                     $DatabaseSubnetName = $targetSubnet.Name
                     
-                    Write-Host "`n  Configuring delegation on subnet: $DatabaseSubnetName..." -ForegroundColor Cyan
+                    Write-Host "`n  Checking for resource locks on VNet..." -ForegroundColor Cyan
                     
-                    # Add delegation
-                    $targetSubnet.Delegations.Add(
-                        (New-Object Microsoft.Azure.Commands.Network.Models.PSDelegation -Property @{
-                            Name = "PostgreSQLFlexibleServer"
-                            ServiceName = "Microsoft.DBforPostgreSQL/flexibleServers"
-                        })
-                    )
+                    # Check for locks on the VNet
+                    $vnetLocks = Get-AzResourceLock -ResourceGroupName $vnetResourceGroup -ResourceName $VNetName -ResourceType "Microsoft.Network/virtualNetworks" -ErrorAction SilentlyContinue
                     
-                    try {
-                        Set-AzVirtualNetwork -VirtualNetwork $selectedVNet | Out-Null
-                        Write-Host "  ✓ Delegation configured successfully!" -ForegroundColor Green
-                    } catch {
-                        Write-Error "Failed to configure delegation: $_"
-                        exit 1
+                    if ($vnetLocks) {
+                        Write-Host "  ⚠️  WARNING: VNet has resource lock(s):" -ForegroundColor Red
+                        foreach ($lock in $vnetLocks) {
+                            Write-Host "    - $($lock.Name) ($($lock.Properties.level))" -ForegroundColor Yellow
+                        }
+                        
+                        Write-Host "`n  Subnet delegation requires modifying the VNet, which is blocked by the lock." -ForegroundColor Yellow
+                        Write-Host "  Options:" -ForegroundColor Cyan
+                        Write-Host "    1. Temporarily remove lock, add delegation, then re-apply lock" -ForegroundColor White
+                        Write-Host "    2. Skip delegation (you must add it manually before deployment)" -ForegroundColor White
+                        Write-Host "    3. Switch to public database access" -ForegroundColor White
+                        
+                        $lockChoice = Read-Host "`n  Select option (1-3)"
+                        
+                        if ($lockChoice -eq "1") {
+                            # Remove locks temporarily
+                            Write-Host "`n  Removing locks temporarily..." -ForegroundColor Cyan
+                            $removedLocks = @()
+                            foreach ($lock in $vnetLocks) {
+                                Remove-AzResourceLock -LockId $lock.LockId -Force | Out-Null
+                                $removedLocks += $lock
+                                Write-Host "    ✓ Removed: $($lock.Name)" -ForegroundColor Green
+                            }
+                            
+                            # Add delegation
+                            Write-Host "`n  Configuring delegation on subnet: $DatabaseSubnetName..." -ForegroundColor Cyan
+                            
+                            $targetSubnet.Delegations.Add(
+                                (New-Object Microsoft.Azure.Commands.Network.Models.PSDelegation -Property @{
+                                    Name = "PostgreSQLFlexibleServer"
+                                    ServiceName = "Microsoft.DBforPostgreSQL/flexibleServers"
+                                })
+                            )
+                            
+                            try {
+                                Set-AzVirtualNetwork -VirtualNetwork $selectedVNet | Out-Null
+                                Write-Host "  ✓ Delegation configured successfully!" -ForegroundColor Green
+                            } catch {
+                                Write-Error "Failed to configure delegation: $_"
+                                
+                                # Re-apply locks before exiting
+                                Write-Host "`n  Re-applying locks..." -ForegroundColor Cyan
+                                foreach ($lock in $removedLocks) {
+                                    New-AzResourceLock -LockName $lock.Name -LockLevel $lock.Properties.level -ResourceGroupName $vnetResourceGroup -ResourceName $VNetName -ResourceType "Microsoft.Network/virtualNetworks" -LockNotes $lock.Properties.notes -Force | Out-Null
+                                }
+                                
+                                exit 1
+                            }
+                            
+                            # Re-apply locks
+                            Write-Host "`n  Re-applying locks..." -ForegroundColor Cyan
+                            foreach ($lock in $removedLocks) {
+                                New-AzResourceLock -LockName $lock.Name -LockLevel $lock.Properties.level -ResourceGroupName $vnetResourceGroup -ResourceName $VNetName -ResourceType "Microsoft.Network/virtualNetworks" -LockNotes $lock.Properties.notes -Force | Out-Null
+                                Write-Host "    ✓ Re-applied: $($lock.Name)" -ForegroundColor Green
+                            }
+                        } elseif ($lockChoice -eq "2") {
+                            Write-Host "`n  ⚠️  IMPORTANT: You MUST manually add PostgreSQL delegation to subnet '$DatabaseSubnetName'" -ForegroundColor Red
+                            Write-Host "  Before running this deployment, execute:" -ForegroundColor Yellow
+                            Write-Host "    `$vnet = Get-AzVirtualNetwork -Name '$VNetName' -ResourceGroupName '$vnetResourceGroup'" -ForegroundColor Cyan
+                            Write-Host "    `$subnet = Get-AzVirtualNetworkSubnetConfig -VirtualNetwork `$vnet -Name '$DatabaseSubnetName'" -ForegroundColor Cyan
+                            Write-Host "    `$subnet.Delegations.Add((New-Object Microsoft.Azure.Commands.Network.Models.PSDelegation -Property @{Name='PostgreSQL';ServiceName='Microsoft.DBforPostgreSQL/flexibleServers'}))" -ForegroundColor Cyan
+                            Write-Host "    Set-AzVirtualNetwork -VirtualNetwork `$vnet" -ForegroundColor Cyan
+                            Write-Host "`n  Continue with deployment assuming delegation will be added? (y/N)" -ForegroundColor Yellow
+                            $continue = Read-Host
+                            if ($continue -ne 'y' -and $continue -ne 'Y') {
+                                exit 1
+                            }
+                        } elseif ($lockChoice -eq "3") {
+                            Write-Host "`n  ⚠️  Switching to PUBLIC database access" -ForegroundColor Yellow
+                            Write-Host "  Database will be accessible via public endpoint with firewall rules" -ForegroundColor Yellow
+                            $enablePrivateDatabaseAccess = $false
+                            $DatabaseSubnetName = "" # Not needed for public access
+                        } else {
+                            Write-Error "Invalid selection"
+                            exit 1
+                        }
+                    } else {
+                        # No locks - proceed with delegation
+                        Write-Host "  ✓ No locks found" -ForegroundColor Green
+                        Write-Host "`n  Configuring delegation on subnet: $DatabaseSubnetName..." -ForegroundColor Cyan
+                        
+                        $targetSubnet.Delegations.Add(
+                            (New-Object Microsoft.Azure.Commands.Network.Models.PSDelegation -Property @{
+                                Name = "PostgreSQLFlexibleServer"
+                                ServiceName = "Microsoft.DBforPostgreSQL/flexibleServers"
+                            })
+                        )
+                        
+                        try {
+                            Set-AzVirtualNetwork -VirtualNetwork $selectedVNet | Out-Null
+                            Write-Host "  ✓ Delegation configured successfully!" -ForegroundColor Green
+                        } catch {
+                            Write-Error "Failed to configure delegation: $_"
+                            exit 1
+                        }
                     }
                 } else {
                     Write-Error "Invalid selection"
@@ -866,6 +982,10 @@ if ($UseCustomAcr -and -not [string]::IsNullOrEmpty($AcrName)) {
 
 if (-not [string]::IsNullOrEmpty($DomainName)) {
     $deploymentParams.domainName = $DomainName
+}
+
+if (-not [string]::IsNullOrEmpty($DnsNamePrefix)) {
+    $deploymentParams.dnsNamePrefix = $DnsNamePrefix
 }
 
 Write-Host "Starting template deployment..." -ForegroundColor Cyan
