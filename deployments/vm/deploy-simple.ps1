@@ -721,6 +721,45 @@ if ($createNewVNet) {
     } else {
         Write-Host "  Database Access: Public (with firewall rules)" -ForegroundColor Yellow
     }
+    
+    # ========================================================================
+    # DNS Configuration for Private Database Access
+    # ========================================================================
+    
+    if ($DatabaseSubnetName) {
+        Write-Host "`nDNS Configuration for VM:" -ForegroundColor Yellow
+        Write-Host "  Private DNS zones (privatelink.postgres.database.azure.com) require Azure DNS" -ForegroundColor Gray
+        Write-Host "  If your VNet has custom DNS servers, the VM must use Azure DNS to resolve private endpoints" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  DNS Options:" -ForegroundColor Cyan
+        Write-Host "    1. Use Azure DNS (168.63.129.16) - RECOMMENDED" -ForegroundColor White
+        Write-Host "       ✓ Required for private database access" -ForegroundColor Green
+        Write-Host "       ✓ VM can still access corporate resources via Azure DNS forwarding" -ForegroundColor Green
+        Write-Host "    2. Inherit from VNet - Use VNet's configured DNS servers" -ForegroundColor White
+        Write-Host "       ⚠ Only works if VNet DNS forwards privatelink queries to Azure DNS" -ForegroundColor Yellow
+        Write-Host ""
+        
+        $dnsChoice = Read-Host "  Select DNS configuration (1-2, default: 1)"
+        
+        if ($dnsChoice -eq "2") {
+            Write-Host "  ⚠ WARNING: VM will inherit VNet DNS servers" -ForegroundColor Yellow
+            Write-Host "  If VNet DNS cannot resolve privatelink domains, deployment will fail!" -ForegroundColor Red
+            $confirm = Read-Host "  Continue with VNet DNS? (y/N)"
+            if ($confirm -eq 'y' -or $confirm -eq 'Y') {
+                $useAzureDNS = $false
+                Write-Host "  ✓ VM will use VNet DNS servers" -ForegroundColor Yellow
+            } else {
+                $useAzureDNS = $true
+                Write-Host "  ✓ VM will use Azure DNS (168.63.129.16)" -ForegroundColor Green
+            }
+        } else {
+            $useAzureDNS = $true
+            Write-Host "  ✓ VM will use Azure DNS (168.63.129.16)" -ForegroundColor Green
+        }
+    } else {
+        # Public database access doesn't require Azure DNS
+        $useAzureDNS = $false
+    }
 }
 
 # ============================================================================
@@ -942,6 +981,7 @@ $deploymentParams = @{
     oauthClientSecret     = (ConvertTo-SecureString -String $oauthClientSecret -AsPlainText -Force)
     enableKeyVault        = $true  # PowerShell creates the vault, Bicep references it and creates secrets
     enablePrivateDatabaseAccess = if ($createNewVNet) { $true } else { if ($DatabaseSubnetName) { $true } else { $false } }
+    useAzureDNS           = if (Get-Variable -Name useAzureDNS -ErrorAction SilentlyContinue) { $useAzureDNS } else { $true }
     enableMonitoring      = $false  # Disabled to avoid policy restrictions on Log Analytics
     Verbose               = $true
 }
