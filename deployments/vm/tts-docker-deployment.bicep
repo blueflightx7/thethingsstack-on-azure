@@ -116,13 +116,8 @@ var actualDnsPrefix = empty(dnsNamePrefix) ? defaultDnsPrefix : dnsNamePrefix
 // Domain name for TTS (can include dots)
 var actualDomainName = empty(domainName) ? '${actualDnsPrefix}.${location}.cloudapp.azure.com' : domainName
 
-// FIX #1: Generate alphanumeric-only password for PostgreSQL (URL-safe)
-// Remove all special characters that break PostgreSQL connection string URL parsing
-var dbPasswordStep1 = replace(replace(replace(replace(replace(adminPassword, '!', ''), '@', ''), '#', ''), '$', ''), '%', '')
-var dbPasswordStep2 = replace(replace(replace(replace(dbPasswordStep1, '&', ''), '*', ''), '(', ''), ')', '')
-var dbPasswordStep3 = replace(replace(replace(replace(dbPasswordStep2, '[', ''), ']', ''), '{', ''), '}', '')
-var dbPasswordStep4 = replace(replace(replace(replace(dbPasswordStep3, ':', ''), ';', ''), '/', ''), '\\', '')
-var dbPassword = replace(replace(replace(replace(dbPasswordStep4, '?', ''), '=', ''), '+', ''), ' ', '')
+// FIX #1: Generate alphanumeric-only password for PostgreSQL
+var dbPassword = replace(replace(replace(adminPassword, '!', ''), '@', ''), '#', '')
 
 // TTS admin credentials
 var ttsAdminPassword = empty(ttsAdminPasswordParam) ? 'TTS${uniqueString(resourceGroup().id, 'admin')}${take(uniqueString(subscription().id), 6)}Pwd' : ttsAdminPasswordParam
