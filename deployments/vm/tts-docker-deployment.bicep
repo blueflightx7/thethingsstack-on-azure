@@ -350,7 +350,7 @@ resource dbServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview'
     }
     network: enablePrivateDatabaseAccess ? {
       delegatedSubnetResourceId: useExistingVNet 
-        ? '${resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks', vnetName)}/subnets/${databaseSubnetName}'
+        ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', vnetName, databaseSubnetName)
         : resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, databaseSubnetName)
       privateDnsZoneArmResourceId: privateDnsZone.id
       publicNetworkAccess: 'Disabled'
