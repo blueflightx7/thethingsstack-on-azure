@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1600">
+  <defs>
+    <style>
+      .fix-box { fill: #E8F5E9; stroke: #388E3C; stroke-width: 2; }
+      .critical-box { fill: #FFEBEE; stroke: #C62828; stroke-width: 3; }
+      .header { fill: #1976D2; stroke: #0D47A1; stroke-width: 2; }
+      .icon-circle { fill: #4CAF50; stroke: #2E7D32; stroke-width: 2; }
+      .text-white { fill: white; font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; font-weight: 600; }
+      .text-black { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; }
+      .text-small { fill: #666; font-family: 'Segoe UI', Arial, sans-serif; font-size: 10px; }
+      .code { fill: #333; font-family: 'Courier New', monospace; font-size: 10px; }
+      .title { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 26px; font-weight: 700; }
+      .fix-number { fill: white; font-family: 'Segoe UI', Arial, sans-serif; font-size: 18px; font-weight: 700; text-anchor: middle; }
+      .icon-text { fill: white; font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: 700; text-anchor: middle; }
+    </style>
+  </defs>
+  
+  <!-- Title -->
+  <text x="600" y="45" class="title" text-anchor="middle">The 12 Critical Fixes</text>
+  <text x="600" y="70" class="text-black" text-anchor="middle" font-size="14" font-style="italic">Never regress these fixes - they are production-critical</text>
+  
+  <!-- Fix 1 -->
+  <rect x="50" y="100" width="550" height="110" rx="5" class="fix-box"/>
+  <circle cx="90" cy="145" r="25" class="icon-circle"/>
+  <text x="90" y="153" class="fix-number">1</text>
+  <text x="130" y="130" class="text-black" font-weight="700">Admin User Creation with --password Flag</text>
+  <text x="130" y="148" class="text-small">File: tts-docker-deployment.bicep:826</text>
+  <text x="130" y="168" class="code">create-admin-user --id admin --email admin@example.com \</text>
+  <text x="130" y="182" class="code">  --password 'password' --is.database-uri='postgresql://...'</text>
+  <text x="130" y="200" class="text-small">❌ Never use: printf 'password\npassword\n' | create-admin-user</text>
+  
+  <!-- Fix 2 -->
+  <rect x="650" y="100" width="500" height="110" rx="5" class="fix-box"/>
+  <circle cx="690" cy="145" r="25" class="icon-circle"/>
+  <text x="690" y="153" class="fix-number">2</text>
+  <text x="730" y="130" class="text-black" font-weight="700">SSH IP Restriction</text>
+  <text x="730" y="148" class="text-small">File: deploy-simple.ps1:82-100</text>
+  <text x="730" y="168" class="code">$deployerIP = Invoke-RestMethod -Uri 'https://api.ipify.org'</text>
+  <text x="730" y="182" class="code">adminSourceIP: $deployerIP</text>
+  <text x="730" y="200" class="text-small">✅ Auto-detected, never '*' in production</text>
+  
+  <!-- Fix 3 -->
+  <rect x="50" y="230" width="550" height="110" rx="5" class="fix-box"/>
+  <circle cx="90" cy="275" r="25" class="icon-circle"/>
+  <text x="90" y="283" class="fix-number">3</text>
+  <text x="130" y="260" class="text-black" font-weight="700">Key Vault RBAC with Wait Time</text>
+  <text x="130" y="278" class="text-small">File: deploy-simple.ps1:128-160</text>
+  <text x="130" y="298" class="code">New-AzRoleAssignment -RoleDefinitionName "Key Vault Secrets Officer"</text>
+  <text x="130" y="312" class="code">Start-Sleep -Seconds 30  # Wait for propagation</text>
+  <text x="130" y="330" class="text-small">⚠️ Critical: 30s wait required for RBAC propagation</text>
+  
+  <!-- Fix 4 -->
+  <rect x="650" y="230" width="500" height="110" rx="5" class="fix-box"/>
+  <circle cx="690" cy="275" r="25" class="icon-circle"/>
+  <text x="690" y="283" class="fix-number">4</text>
+  <text x="730" y="260" class="text-black" font-weight="700">Cookie Keys (64 Hex Characters)</text>
+  <text x="730" y="278" class="text-small">File: deploy-simple.ps1</text>
+  <text x="730" y="298" class="code">$cookieHashKey = -join ((0..63) | ForEach-Object {</text>
+  <text x="730" y="312" class="code">  '{0:X}' -f (Get-Random -Maximum 16) })</text>
+  <text x="730" y="330" class="text-small">✅ Exactly 64 hex chars for hash and block keys</text>
+  
+  <!-- Fix 5 -->
+  <rect x="50" y="360" width="550" height="110" rx="5" class="fix-box"/>
+  <circle cx="90" cy="405" r="25" class="icon-circle"/>
+  <text x="90" y="413" class="fix-number">5</text>
+  <text x="130" y="390" class="text-black" font-weight="700">OAuth Client Secret: "console"</text>
+  <text x="130" y="408" class="text-small">File: deploy-simple.ps1</text>
+  <text x="130" y="428" class="code">Set-AzKeyVaultSecret -Name "oauth-client-secret" \</text>
+  <text x="130" y="442" class="code">  -SecretValue (ConvertTo-SecureString -String "console")</text>
+  <text x="130" y="460" class="text-small">✅ Always "console" - do not randomize</text>
+  
+  <!-- Fix 6 -->
+  <rect x="650" y="360" width="500" height="110" rx="5" class="fix-box"/>
+  <circle cx="690" cy="405" r="25" class="icon-circle"/>
+  <text x="690" y="413" class="fix-number">6</text>
+  <text x="730" y="390" class="text-black" font-weight="700">Container Readiness Wait</text>
+  <text x="730" y="408" class="text-small">File: tts-docker-deployment.bicep:812</text>
+  <text x="730" y="428" class="code">until [ "$(docker inspect --format='{{.State.Health.Status}}' \</text>
+  <text x="730" y="442" class="code">  stack_1)" == "healthy" ]; do sleep 5; done</text>
+  <text x="730" y="460" class="text-small">⚠️ Must wait for health check before admin user creation</text>
+  
+  <!-- Fix 7 -->
+  <rect x="50" y="490" width="550" height="110" rx="5" class="fix-box"/>
+  <circle cx="90" cy="535" r="25" class="icon-circle"/>
+  <text x="90" y="543" class="fix-number">7</text>
+  <text x="130" y="520" class="text-black" font-weight="700">Database Credentials (Alphanumeric Only)</text>
+  <text x="130" y="538" class="text-small">File: tts-docker-deployment.bicep:123</text>
+  <text x="130" y="558" class="code">var dbPassword = replace(replace(replace(adminPassword,</text>
+  <text x="130" y="572" class="code">  '@', ''), '!', ''), '#', '')</text>
+  <text x="130" y="590" class="text-small">✅ Remove @, !, # from PostgreSQL password</text>
+  
+  <!-- Fix 8 - CRITICAL -->
+  <rect x="650" y="490" width="500" height="110" rx="5" class="critical-box"/>
+  <circle cx="690" cy="535" r="25" fill="#D32F2F" stroke="#B71C1C" stroke-width="2"/>
+  <text x="690" y="543" class="fix-number">8</text>
+  <text x="730" y="520" class="text-black" font-weight="700">⚠️ Brownfield VNet DNS (CRITICAL)</text>
+  <text x="730" y="538" class="text-small">File: tts-docker-deployment.bicep:314-318</text>
+  <text x="730" y="558" class="code">dnsSettings: useAzureDNS ? {</text>
+  <text x="730" y="572" class="code">  dnsServers: ['168.63.129.16'] } : null</text>
+  <text x="730" y="590" class="text-small">🔥 VM must use Azure DNS when VNet has custom DNS</text>
+  
+  <!-- Fix 9 - CRITICAL -->
+  <rect x="50" y="620" width="550" height="110" rx="5" class="critical-box"/>
+  <circle cx="90" cy="665" r="25" fill="#D32F2F" stroke="#B71C1C" stroke-width="2"/>
+  <text x="90" y="673" class="fix-number">9</text>
+  <text x="130" y="650" class="text-black" font-weight="700">⚠️ Private DNS Zone VNet Link</text>
+  <text x="130" y="668" class="text-small">File: tts-docker-deployment.bicep:273-283</text>
+  <text x="130" y="688" class="code">virtualNetwork: { id: resourceId(subscriptionId,</text>
+  <text x="130" y="702" class="code">  vnetResourceGroup, 'Microsoft.Network/virtualNetworks', vnetName) }</text>
+  <text x="130" y="720" class="text-small">🔥 Must link private DNS zone to VNet (cross-RG supported)</text>
+  
+  <!-- Fix 10 - CRITICAL -->
+  <rect x="650" y="620" width="500" height="110" rx="5" class="critical-box"/>
+  <circle cx="690" cy="665" r="25" fill="#D32F2F" stroke="#B71C1C" stroke-width="2"/>
+  <text x="690" y="673" class="fix-number">10</text>
+  <text x="730" y="650" class="text-black" font-weight="700">⚠️ PostgreSQL Subnet Delegation</text>
+  <text x="730" y="668" class="text-small">File: tts-docker-deployment.bicep:352</text>
+  <text x="730" y="688" class="code">resourceId(subscriptionId, vnetResourceGroup,</text>
+  <text x="730" y="702" class="code">  'Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)</text>
+  <text x="730" y="720" class="text-small">🔥 Use 5-parameter resourceId for cross-RG subnets</text>
+  
+  <!-- Fix 11 - CRITICAL -->
+  <rect x="50" y="750" width="550" height="110" rx="5" class="critical-box"/>
+  <circle cx="90" cy="795" r="25" fill="#D32F2F" stroke="#B71C1C" stroke-width="2"/>
+  <text x="90" y="803" class="fix-number">11</text>
+  <text x="130" y="780" class="text-black" font-weight="700">⚠️ PostgreSQL Dependency Chain</text>
+  <text x="130" y="798" class="text-small">File: tts-docker-deployment.bicep:354</text>
+  <text x="130" y="818" class="code">privateDnsZoneArmResourceId: privateDnsZone.id</text>
+  <text x="130" y="832" class="text-small">// NOT: resourceId('Microsoft.Network/privateDnsZones', ...)</text>
+  <text x="130" y="850" class="text-small">🔥 Use symbolic reference .id for implicit dependency</text>
+  
+  <!-- Fix 12 - CRITICAL -->
+  <rect x="650" y="750" width="500" height="110" rx="5" class="critical-box"/>
+  <circle cx="690" cy="795" r="25" fill="#D32F2F" stroke="#B71C1C" stroke-width="2"/>
+  <text x="690" y="803" class="fix-number">12</text>
+  <text x="730" y="780" class="text-black" font-weight="700">⚠️ Database Init with Explicit URI</text>
+  <text x="730" y="798" class="text-small">File: tts-docker-deployment.bicep:824-833</text>
+  <text x="730" y="818" class="code">docker exec stack_1 ttn-lw-stack is-db migrate \</text>
+  <text x="730" y="832" class="code">  --is.database-uri='postgresql://user:pass@host/db?sslmode=require'</text>
+  <text x="730" y="850" class="text-small">🔥 All is-db commands MUST include --is.database-uri flag</text>
+  
+  <!-- Summary Box -->
+  <rect x="50" y="900" width="1100" height="180" rx="8" fill="#FFF3E0" stroke="#E65100" stroke-width="3"/>
+  <text x="600" y="935" class="text-black" text-anchor="middle" font-size="18" font-weight="700">Critical Fix Categories</text>
+  
+  <rect x="80" y="960" width="330" height="100" rx="5" fill="white" stroke="#999" stroke-width="1"/>
+  <text x="245" y="985" class="text-black" text-anchor="middle" font-weight="700">🔐 Security (Fixes 2, 3)</text>
+  <text x="95" y="1005" class="text-small">• SSH IP restriction</text>
+  <text x="95" y="1020" class="text-small">• Key Vault RBAC propagation</text>
+  <text x="95" y="1035" class="text-small">• Auto-detected deployer IP</text>
+  <text x="95" y="1050" class="text-small">• 30-second wait for permissions</text>
+  
+  <rect x="440" y="960" width="330" height="100" rx="5" fill="white" stroke="#999" stroke-width="1"/>
+  <text x="605" y="985" class="text-black" text-anchor="middle" font-weight="700">🔧 Configuration (Fixes 1, 4, 5, 6, 7)</text>
+  <text x="455" y="1005" class="text-small">• Admin user creation method</text>
+  <text x="455" y="1020" class="text-small">• Cookie key generation (64 hex)</text>
+  <text x="455" y="1035" class="text-small">• OAuth client secret hardcoded</text>
+  <text x="455" y="1050" class="text-small">• Container health check wait</text>
+  
+  <rect x="800" y="960" width="330" height="100" rx="5" fill="white" stroke="#999" stroke-width="1"/>
+  <text x="965" y="985" class="text-black" text-anchor="middle" font-weight="700">🌐 Networking (Fixes 8, 9, 10, 11, 12)</text>
+  <text x="815" y="1005" class="text-small">• Brownfield DNS configuration</text>
+  <text x="815" y="1020" class="text-small">• Private DNS zone VNet linking</text>
+  <text x="815" y="1035" class="text-small">• Subnet delegation (cross-RG)</text>
+  <text x="815" y="1050" class="text-small">• Database URI in all is-db commands</text>
+  
+  <!-- Documentation References -->
+  <rect x="50" y="1120" width="1100" height="100" rx="8" fill="#E3F2FD" stroke="#1976D2" stroke-width="2"/>
+  <text x="600" y="1155" class="text-black" text-anchor="middle" font-size="16" font-weight="700">📚 Documentation References</text>
+  <text x="600" y="1180" class="text-small" text-anchor="middle">DEPLOYMENT_FIXES_SUMMARY.md - Detailed explanation of all 12 fixes</text>
+  <text x="600" y="1198" class="text-small" text-anchor="middle">BROWNFIELD_DNS_CONFIGURATION.md - Fixes 8, 9, 10, 11 (brownfield scenarios)</text>
+  <text x="600" y="1216" class="text-small" text-anchor="middle">SECURITY_FIX_SUMMARY.md - Fixes 2, 3 (security hardening)</text>
+  
+  <!-- Warning Footer -->
+  <rect x="50" y="1260" width="1100" height="80" rx="8" fill="#FFEBEE" stroke="#C62828" stroke-width="3"/>
+  <text x="600" y="1295" class="text-black" text-anchor="middle" font-size="18" font-weight="700">⚠️ NEVER REGRESS THESE FIXES ⚠️</text>
+  <text x="600" y="1320" class="text-small" text-anchor="middle" font-style="italic">Before modifying Bicep or PowerShell scripts, review DEPLOYMENT_FIXES_SUMMARY.md</text>
+  
+  <!-- Recovery Context -->
+  <rect x="50" y="1380" width="1100" height="160" rx="8" fill="#F3F3F3" stroke="#999" stroke-width="2"/>
+  <text x="600" y="1415" class="text-black" text-anchor="middle" font-size="16" font-weight="700">🏗️ Project Context: Catastrophic Recovery</text>
+  
+  <text x="80" y="1445" class="text-small">• September 2025: Git cleanup disaster - lost 2,738+ lines of code</text>
+  <text x="80" y="1465" class="text-small">• October 2025: Complete rebuild with 7 critical bug discoveries and fixes</text>
+  <text x="80" y="1485" class="text-small">• November 2025: Added 5 additional brownfield deployment fixes (Fixes 8-12)</text>
+  <text x="80" y="1505" class="text-small">• All fixes documented in docs/DEPLOYMENT_FIXES_SUMMARY.md and docs/BROWNFIELD_DNS_CONFIGURATION.md</text>
+  <text x="80" y="1525" class="text-small">• Project now has 15,000+ lines of documentation ensuring these fixes are never lost again</text>
+</svg>

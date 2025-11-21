@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700">
+  <defs>
+    <style>
+      .source-box { fill: #E3F2FD; stroke: #1976D2; stroke-width: 2; }
+      .log-box { fill: #FFF9C4; stroke: #F57F17; stroke-width: 2; }
+      .monitor-box { fill: #C8E6C9; stroke: #388E3C; stroke-width: 2; }
+      .command-box { fill: #FCE4EC; stroke: #C2185B; stroke-width: 2; }
+      .text-black { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; }
+      .text-small { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 10px; }
+      .text-white { fill: white; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; font-weight: 600; }
+      .title { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 22px; font-weight: 700; }
+      .arrow { stroke: #333; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .code { fill: #333; font-family: 'Courier New', monospace; font-size: 9px; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="500" y="35" class="title" text-anchor="middle">Troubleshooting Log Sources & Commands</text>
+  
+  <!-- Log Sources -->
+  <text x="50" y="80" class="text-black" font-weight="700" font-size="14">📋 Log Sources</text>
+  
+  <!-- Source 1: cloud-init -->
+  <rect x="50" y="100" width="200" height="80" rx="5" class="source-box"/>
+  <text x="150" y="125" class="text-black" text-anchor="middle" font-weight="700">cloud-init Logs</text>
+  <text x="150" y="143" class="text-small" text-anchor="middle">Bootstrap process</text>
+  <text x="150" y="158" class="text-small" text-anchor="middle">Package installation</text>
+  <text x="150" y="173" class="text-small" text-anchor="middle">System configuration</text>
+  
+  <path d="M 250 140 L 330 200" class="arrow"/>
+  
+  <!-- Source 2: Docker -->
+  <rect x="50" y="200" width="200" height="80" rx="5" class="source-box"/>
+  <text x="150" y="225" class="text-black" text-anchor="middle" font-weight="700">Docker Logs</text>
+  <text x="150" y="243" class="text-small" text-anchor="middle">Container output</text>
+  <text x="150" y="258" class="text-small" text-anchor="middle">TTS application logs</text>
+  <text x="150" y="273" class="text-small" text-anchor="middle">Runtime errors</text>
+  
+  <path d="M 250 240 L 330 260" class="arrow"/>
+  
+  <!-- Source 3: Azure Deployment -->
+  <rect x="50" y="300" width="200" height="80" rx="5" class="source-box"/>
+  <text x="150" y="325" class="text-black" text-anchor="middle" font-weight="700">Azure Deployment</text>
+  <text x="150" y="343" class="text-small" text-anchor="middle">Bicep template errors</text>
+  <text x="150" y="358" class="text-small" text-anchor="middle">Resource provisioning</text>
+  <text x="150" y="373" class="text-small" text-anchor="middle">ARM operations</text>
+  
+  <path d="M 250 340 L 330 300" class="arrow"/>
+  
+  <!-- Source 4: Azure Monitor -->
+  <rect x="50" y="400" width="200" height="80" rx="5" class="source-box"/>
+  <text x="150" y="425" class="text-black" text-anchor="middle" font-weight="700">Azure Monitor</text>
+  <text x="150" y="443" class="text-small" text-anchor="middle">Log Analytics</text>
+  <text x="150" y="458" class="text-small" text-anchor="middle">Application Insights</text>
+  <text x="150" y="473" class="text-small" text-anchor="middle">Metrics & Alerts</text>
+  
+  <path d="M 250 440 L 330 360" class="arrow"/>
+  
+  <!-- Central Decision Point -->
+  <rect x="330" y="200" width="180" height="180" rx="5" class="log-box"/>
+  <text x="420" y="230" class="text-black" text-anchor="middle" font-weight="700" font-size="14">Issue Category?</text>
+  <line x1="340" y1="240" x2="500" y2="240" stroke="#F57F17" stroke-width="1"/>
+  <text x="420" y="265" class="text-small" text-anchor="middle">Deployment Failed?</text>
+  <text x="420" y="285" class="text-small" text-anchor="middle">Container Not Starting?</text>
+  <text x="420" y="305" class="text-small" text-anchor="middle">Login Issues?</text>
+  <text x="420" y="325" class="text-small" text-anchor="middle">DNS Resolution?</text>
+  <text x="420" y="345" class="text-small" text-anchor="middle">Database Connection?</text>
+  <text x="420" y="365" class="text-small" text-anchor="middle">Performance Issues?</text>
+  
+  <!-- Commands Section -->
+  <text x="550" y="80" class="text-black" font-weight="700" font-size="14">🔧 Diagnostic Commands</text>
+  
+  <!-- Command 1: Deployment -->
+  <rect x="550" y="100" width="400" height="80" rx="5" class="command-box"/>
+  <text x="750" y="120" class="text-black" text-anchor="middle" font-weight="700">Deployment Validation</text>
+  <line x1="560" y1="128" x2="940" y2="128" stroke="#C2185B" stroke-width="1"/>
+  <text x="560" y="143" class="code">az deployment group show -g &lt;rg-name&gt; -n &lt;deployment&gt;</text>
+  <text x="560" y="158" class="code">az deployment operation list -g &lt;rg-name&gt; -n &lt;deployment&gt;</text>
+  <text x="560" y="173" class="code">bicep build deployments/vm/tts-docker-deployment.bicep</text>
+  
+  <path d="M 510 290 L 550 140" class="arrow"/>
+  
+  <!-- Command 2: VM/Container -->
+  <rect x="550" y="200" width="400" height="100" rx="5" class="command-box"/>
+  <text x="750" y="220" class="text-black" text-anchor="middle" font-weight="700">VM & Container Diagnostics</text>
+  <line x1="560" y1="228" x2="940" y2="228" stroke="#C2185B" stroke-width="1"/>
+  <text x="560" y="243" class="code">ssh ttsadmin@&lt;vm-ip&gt;</text>
+  <text x="560" y="258" class="code">cat /var/log/cloud-init-output.log</text>
+  <text x="560" y="273" class="code">docker logs lorawan-stack_stack_1 -f --tail 100</text>
+  <text x="560" y="288" class="code">docker exec -it lorawan-stack_stack_1 bash</text>
+  
+  <path d="M 510 270 L 550 250" class="arrow"/>
+  
+  <!-- Command 3: Database -->
+  <rect x="550" y="320" width="400" height="90" rx="5" class="command-box"/>
+  <text x="750" y="340" class="text-black" text-anchor="middle" font-weight="700">Database Connectivity</text>
+  <line x1="560" y1="348" x2="940" y2="348" stroke="#C2185B" stroke-width="1"/>
+  <text x="560" y="363" class="code">docker exec -it stack_1 psql -h &lt;db-host&gt; -U ttsadmin tts</text>
+  <text x="560" y="378" class="code">docker exec stack_1 pg_isready -h &lt;db-host&gt; -U ttsadmin</text>
+  <text x="560" y="393" class="code">nslookup &lt;db-fqdn&gt; 168.63.129.16</text>
+  
+  <path d="M 510 310 L 550 360" class="arrow"/>
+  
+  <!-- Command 4: Monitoring -->
+  <rect x="550" y="430" width="400" height="100" rx="5" class="command-box"/>
+  <text x="750" y="450" class="text-black" text-anchor="middle" font-weight="700">Monitoring & Metrics</text>
+  <line x1="560" y1="458" x2="940" y2="458" stroke="#C2185B" stroke-width="1"/>
+  <text x="560" y="473" class="code">az monitor log-analytics query -w &lt;workspace-id&gt; \</text>
+  <text x="560" y="488" class="code">  --analytics-query "ContainerLog | where TimeGenerated &gt; ago(1h)"</text>
+  <text x="560" y="503" class="code">az monitor metrics list --resource &lt;vm-resource-id&gt;</text>
+  <text x="560" y="518" class="code">docker stats</text>
+  
+  <path d="M 510 340 L 550 480" class="arrow"/>
+  
+  <!-- Common Issues Box -->
+  <rect x="50" y="550" width="900" height="120" rx="5" fill="#F3F3F3" stroke="#999" stroke-width="2"/>
+  <text x="60" y="575" class="text-black" font-weight="700" font-size="14">🔍 Common Issue Patterns</text>
+  
+  <text x="70" y="600" class="text-small" font-weight="700">Symptom</text>
+  <text x="300" y="600" class="text-small" font-weight="700">Log Location</text>
+  <text x="550" y="600" class="text-small" font-weight="700">Root Cause</text>
+  
+  <line x1="60" y1="605" x2="940" y2="605" stroke="#999" stroke-width="1"/>
+  
+  <text x="70" y="620" class="text-small">Container restart loop</text>
+  <text x="300" y="620" class="code">docker logs lorawan-stack_stack_1</text>
+  <text x="550" y="620" class="text-small">Missing --is.database-uri flag (Fix #12)</text>
+  
+  <text x="70" y="638" class="text-small">Login fails with "driver error"</text>
+  <text x="300" y="638" class="code">/var/log/cloud-init-output.log</text>
+  <text x="550" y="638" class="text-small">Admin user password method (Fix #1)</text>
+  
+  <text x="70" y="656" class="text-small">VM can't resolve DB FQDN</text>
+  <text x="300" y="656" class="code">nslookup output, cloud-init log</text>
+  <text x="550" y="656" class="text-small">Missing useAzureDNS=true (Fix #8)</text>
+  
+</svg>

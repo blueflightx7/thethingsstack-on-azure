@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1100">
+  <defs>
+    <style>
+      .swim-header { fill: #0078D4; stroke: #004578; stroke-width: 2; }
+      .step-box { fill: #E3F2FD; stroke: #1976D2; stroke-width: 2; }
+      .validation { fill: #FFF9C4; stroke: #F57F17; stroke-width: 2; }
+      .action { fill: #C8E6C9; stroke: #388E3C; stroke-width: 2; }
+      .azure { fill: #81D4FA; stroke: #0277BD; stroke-width: 2; }
+      .text-white { fill: white; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; font-weight: 600; text-anchor: middle; }
+      .text-black { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; text-anchor: middle; }
+      .text-small { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 10px; text-anchor: middle; }
+      .title { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 22px; font-weight: 700; }
+      .arrow { stroke: #333; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .time-label { fill: #666; font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; font-style: italic; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="450" y="35" class="title" text-anchor="middle">Quick Mode Deployment Flow</text>
+  <text x="450" y="55" class="text-small">deploy.ps1 -Mode quick → deploy-simple.ps1 → tts-docker-deployment.bicep</text>
+  
+  <!-- Swimlanes -->
+  <!-- Lane 1: PowerShell -->
+  <rect x="50" y="80" width="250" height="50" rx="5" class="swim-header"/>
+  <text x="175" y="110" class="text-white">PowerShell Orchestration</text>
+  
+  <!-- Lane 2: Azure Resource Manager -->
+  <rect x="320" y="80" width="250" height="50" rx="5" class="swim-header"/>
+  <text x="445" y="110" class="text-white">Azure Resource Manager</text>
+  
+  <!-- Lane 3: VM Bootstrap -->
+  <rect x="590" y="80" width="250" height="50" rx="5" class="swim-header"/>
+  <text x="715" y="110" class="text-white">VM Bootstrap (cloud-init)</text>
+  
+  <!-- Step 1: Collect Parameters -->
+  <rect x="70" y="160" width="210" height="70" rx="5" class="step-box"/>
+  <text x="175" y="188" class="text-black">1. Collect Parameters</text>
+  <text x="175" y="205" class="text-small">Admin Email</text>
+  <text x="175" y="220" class="text-small">Location (default: centralus)</text>
+  
+  <text x="30" y="195" class="time-label">0-10s</text>
+  
+  <path d="M 175 230 L 175 260" class="arrow"/>
+  
+  <!-- Step 2: Auto-detect IP -->
+  <rect x="70" y="260" width="210" height="70" rx="5" class="validation"/>
+  <text x="175" y="288" class="text-black">2. Auto-detect Deployer IP</text>
+  <text x="175" y="305" class="text-small">API: ipify.org</text>
+  <text x="175" y="320" class="text-small">SSH restriction source</text>
+  
+  <text x="30" y="295" class="time-label">10-15s</text>
+  
+  <path d="M 175 330 L 175 360" class="arrow"/>
+  
+  <!-- Step 3: Create Resource Group -->
+  <rect x="70" y="360" width="210" height="60" rx="5" class="action"/>
+  <text x="175" y="383" class="text-black">3. Create Resource Group</text>
+  <text x="175" y="400" class="text-small">rg-tts-{timestamp}</text>
+  <text x="175" y="415" class="text-small">Tag: quickstart</text>
+  
+  <text x="30" y="390" class="time-label">15-20s</text>
+  
+  <path d="M 175 420 L 175 450" class="arrow"/>
+  
+  <!-- Step 4: Create Key Vault -->
+  <rect x="70" y="450" width="210" height="80" rx="5" class="action"/>
+  <text x="175" y="478" class="text-black">4. Create Key Vault</text>
+  <text x="175" y="495" class="text-small">Enable RBAC</text>
+  <text x="175" y="510" class="text-small">Assign Secrets Officer role</text>
+  <text x="175" y="525" class="text-small">Wait 30s for propagation</text>
+  
+  <text x="30" y="490" class="time-label">20-50s</text>
+  
+  <path d="M 175 530 L 175 560" class="arrow"/>
+  
+  <!-- Step 5: Generate & Store Secrets -->
+  <rect x="70" y="560" width="210" height="100" rx="5" class="action"/>
+  <text x="175" y="585" class="text-black">5. Generate Secrets</text>
+  <text x="175" y="602" class="text-small" text-anchor="start">• DB password (alphanumeric)</text>
+  <text x="175" y="617" class="text-small" text-anchor="start">• Cookie keys (64 hex each)</text>
+  <text x="175" y="632" class="text-small" text-anchor="start">• Admin credentials</text>
+  <text x="175" y="647" class="text-small" text-anchor="start">• OAuth secret: "console"</text>
+  
+  <text x="30" y="610" class="time-label">50-60s</text>
+  
+  <path d="M 175 660 L 175 690" class="arrow"/>
+  
+  <!-- Step 6: User Confirmation -->
+  <rect x="70" y="690" width="210" height="60" rx="5" class="validation"/>
+  <text x="175" y="713" class="text-black">6. Confirm Deployment</text>
+  <text x="175" y="730" class="text-small">Display parameters</text>
+  <text x="175" y="745" class="text-small">Press Enter to continue</text>
+  
+  <text x="30" y="720" class="time-label">User</text>
+  
+  <path d="M 280 720 L 340 760" class="arrow"/>
+  
+  <!-- Step 7: Deploy Bicep -->
+  <rect x="340" y="760" width="210" height="100" rx="5" class="azure"/>
+  <text x="445" y="788" class="text-black">7. Deploy Infrastructure</text>
+  <text x="445" y="805" class="text-small">VNet + Subnets + NSG</text>
+  <text x="445" y="820" class="text-small">VM + NIC (Azure DNS)</text>
+  <text x="445" y="835" class="text-small">PostgreSQL (private)</text>
+  <text x="445" y="850" class="text-small">Private DNS zone + link</text>
+  
+  <text x="300" y="810" class="time-label">2-5min</text>
+  
+  <path d="M 550 810 L 610 820" class="arrow"/>
+  
+  <!-- Step 8: cloud-init starts -->
+  <rect x="610" y="760" width="210" height="80" rx="5" class="azure"/>
+  <text x="715" y="788" class="text-black">8. cloud-init Bootstrap</text>
+  <text x="715" y="805" class="text-small">Install Docker</text>
+  <text x="715" y="820" class="text-small">Install packages</text>
+  <text x="715" y="835" class="text-small">Configure system</text>
+  
+  <text x="850" y="800" class="time-label">1-2min</text>
+  
+  <path d="M 715 840 L 715 870" class="arrow"/>
+  
+  <!-- Step 9: Deploy TTS -->
+  <rect x="610" y="870" width="210" height="80" rx="5" class="azure"/>
+  <text x="715" y="898" class="text-black">9. Deploy TTS Stack</text>
+  <text x="715" y="915" class="text-small">docker-compose up -d</text>
+  <text x="715" y="930" class="text-small">Wait for health check</text>
+  <text x="715" y="945" class="text-small">Container ready</text>
+  
+  <text x="850" y="910" class="time-label">2-3min</text>
+  
+  <path d="M 715 950 L 715 980" class="arrow"/>
+  
+  <!-- Step 10: Initialize Database -->
+  <rect x="610" y="980" width="210" height="90" rx="5" class="azure"/>
+  <text x="715" y="1008" class="text-black">10. Initialize Database</text>
+  <text x="715" y="1025" class="text-small">is-db migrate</text>
+  <text x="715" y="1040" class="text-small">create-admin-user</text>
+  <text x="715" y="1055" class="text-small">create-oauth-client</text>
+  
+  <text x="850" y="1025" class="time-label">30-60s</text>
+  
+  <path d="M 610 1025 L 550 960" class="arrow"/>
+  
+  <!-- Step 11: Deployment Complete -->
+  <rect x="340" y="920" width="210" height="80" rx="5" class="action"/>
+  <text x="445" y="948" class="text-black">11. Deployment Complete</text>
+  <text x="445" y="965" class="text-small">Display console URL</text>
+  <text x="445" y="980" class="text-small">Admin credentials</text>
+  <text x="445" y="995" class="text-small">Next steps</text>
+  
+  <text x="300" y="960" class="time-label">Done!</text>
+  
+  <!-- Timeline on left -->
+  <line x1="25" y1="160" x2="25" y2="1000" stroke="#999" stroke-width="2" stroke-dasharray="5,5"/>
+  
+  <!-- Total time box -->
+  <rect x="50" y="1030" width="790" height="50" rx="5" fill="#F3F3F3" stroke="#999" stroke-width="2"/>
+  <text x="445" y="1058" class="text-black" font-size="15" font-weight="700">Total Deployment Time: 10-15 minutes</text>
+</svg>
