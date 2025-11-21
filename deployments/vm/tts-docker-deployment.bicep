@@ -94,6 +94,9 @@ param newSubnetName string = 'tts-subnet'
 @description('Address prefix for new subnet (e.g., 10.0.5.0/24)')
 param newSubnetAddressPrefix string = '10.0.5.0/24'
 
+@description('Use Azure DNS (168.63.129.16) on VM instead of VNet DNS servers - required for private DNS zone resolution')
+param useAzureDNS bool = true
+
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -308,6 +311,11 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-04-01' = {
     networkSecurityGroup: {
       id: nsg.id
     }
+    dnsSettings: useAzureDNS ? {
+      dnsServers: [
+        '168.63.129.16'
+      ]
+    } : null
     ipConfigurations: [
       {
         name: 'ipconfig1'
