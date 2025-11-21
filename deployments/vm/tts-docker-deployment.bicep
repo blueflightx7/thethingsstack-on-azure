@@ -816,19 +816,23 @@ runcmd:
   - sleep 10
   - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db migrate && break || (echo "Database migration attempt $i failed, retrying..."; sleep 5); done
   
-  # FIX #11: Wait for TTS container to be fully ready before creating admin user
+  # FIX #11: Wait for TTS container to be fully ready before database operations
   - echo "Waiting for TTS container to be fully ready..."
   - sleep 30
   - for i in $(seq 1 10); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db --help >/dev/null 2>&1 && break || (echo "Waiting for TTS to be ready (attempt $i/10)..."; sleep 10); done
   
-  # FIX #10 & #11: Create admin user with retry logic using --password flag
-  - echo "Creating admin user..."
-  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-admin-user --id {10} --email {8} --password '{9}' && break || (echo "Admin user creation attempt $i failed, retrying in 10 seconds..."; sleep 10); done
+  # FIX #12: Initialize Identity Server database with explicit URI
+  - echo "Initializing Identity Server database..."
+  - docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db migrate --is.database-uri='postgresql://{0}:{4}@{5}/ttn_lorawan?sslmode=require' || echo "Database migration failed or already migrated"
   
-  # FIX #8 & #9: Create OAuth client for console with retry logic (single redirect URI)
+  # FIX #10 & #11: Create admin user with retry logic using --password flag and explicit database URI
+  - echo "Creating admin user..."
+  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-admin-user --id {10} --email {8} --password '{9}' --is.database-uri='postgresql://{0}:{4}@{5}/ttn_lorawan?sslmode=require' && break || (echo "Admin user creation attempt $i failed, retrying in 10 seconds..."; sleep 10); done
+  
+  # FIX #8 & #9: Create OAuth client for console with retry logic and explicit database URI
   - echo "Creating OAuth client for console..."
   - sleep 5
-  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-oauth-client --id console --name 'Console' --secret 'console' --owner {10} --redirect-uri '/console/oauth/callback' --logout-redirect-uri '/console' && break || (echo "OAuth client creation attempt $i failed, retrying..."; sleep 5); done
+  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-oauth-client --id console --name 'Console' --secret 'console' --owner {10} --redirect-uri '/console/oauth/callback' --logout-redirect-uri '/console' --is.database-uri='postgresql://{0}:{4}@{5}/ttn_lorawan?sslmode=require' && break || (echo "OAuth client creation attempt $i failed, retrying..."; sleep 5); done
   
   # Final verification of complete setup
   - echo "Performing final database verification..."
