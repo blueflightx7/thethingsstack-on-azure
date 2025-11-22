@@ -774,7 +774,7 @@ runcmd:
     # Obtain certificate using standalone mode (runs temporary web server on port 80)
     echo "Obtaining Let's Encrypt certificate for {1}..."
     certbot certonly --standalone --non-interactive --agree-tos --email {8} -d {1} --http-01-port 80 \
-      --pre-hook "systemctl stop docker || true" \
+      --pre-hook "systemctl stop docker.socket docker || true" \
       --post-hook "systemctl start docker || true"
     
     # Copy Let's Encrypt certificates
@@ -832,7 +832,7 @@ runcmd:
   # FIX #8 & #9: Create OAuth client for console with retry logic and explicit database URI
   - echo "Creating OAuth client for console..."
   - sleep 5
-  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-oauth-client --id console --name 'Console' --secret 'console' --owner {10} --redirect-uri '/console/oauth/callback' --logout-redirect-uri '/console' --is.database-uri='postgresql://{0}:{4}@{5}/ttn_lorawan?sslmode=require' && break || (echo "OAuth client creation attempt $i failed, retrying..."; sleep 5); done
+  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-oauth-client --id console --name 'Console' --secret 'console' --owner {10} --redirect-uri 'https://{1}/console/oauth/callback' --redirect-uri 'https://{1}/oauth/callback' --redirect-uri '/console/oauth/callback' --redirect-uri '/oauth/callback' --logout-redirect-uri 'https://{1}/console' --logout-redirect-uri '/console' --is.database-uri='postgresql://{0}:{4}@{5}/ttn_lorawan?sslmode=require' && break || (echo "OAuth client creation attempt $i failed, retrying..."; sleep 5); done
   
   # Final verification of complete setup
   - echo "Performing final database verification..."
