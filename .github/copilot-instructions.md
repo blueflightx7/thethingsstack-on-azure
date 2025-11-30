@@ -22,14 +22,15 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
 
 ## Critical Patterns & Conventions
 
-### 1. The 7 Critical Fixes (NEVER REGRESS)
+### 1. The 12 Critical Fixes (NEVER REGRESS)
 
-**All fixes documented in**: `DEPLOYMENT_FIXES_SUMMARY.md`, `SECURITY_FIX_SUMMARY.md`, `LOGIN_FIX.md`
+**All fixes documented in**: `DEPLOYMENT_FIXES_SUMMARY.md`, `SECURITY_FIX_SUMMARY.md`, `LOGIN_FIX.md`, `docs/BROWNFIELD_DNS_CONFIGURATION.md`
 
-1. **Admin User Creation** (`deployments/vm/tts-docker-deployment.bicep:782`):
+1. **Admin User Creation** (`deployments/vm/tts-docker-deployment.bicep:826`):
    ```bash
    # CORRECT (FIX #7):
-   create-admin-user --password 'password'
+   create-admin-user --id admin --email admin@example.com --password 'password' \
+     --is.database-uri='postgresql://user:pass@server/db?sslmode=require'
    
    # WRONG (causes login failure):
    printf 'password\npassword\n' | create-admin-user
@@ -56,19 +57,76 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
 
 7. **Database Credentials**: Alphanumeric only (no special chars in PostgreSQL password)
 
+8. **Brownfield VNet DNS** (`deployments/vm/tts-docker-deployment.bicep:314-318`):
+   - **CRITICAL**: VNets with custom DNS servers (corporate DNS) cannot resolve Azure Private DNS zones
+   - VM NIC must use Azure DNS (168.63.129.16) when `useAzureDNS=true` (default)
+   - Without this, VM can't resolve PostgreSQL private endpoint FQDN
+   - Symptom: TTS container restart loop with "no such host" DNS errors
+   ```bicep
+   dnsSettings: useAzureDNS ? {
+     dnsServers: ['168.63.129.16']
+   } : null
+   ```
+
+9. **Private DNS Zone VNet Link** (`deployments/vm/tts-docker-deployment.bicep:273-283`):
+   - Private DNS zone (`privatelink.postgres.database.azure.com`) **MUST** be linked to VNet
+   - Supports cross-resource-group VNets (brownfield)
+   - Link must be in "Succeeded" state before database deployment
+   - Zone created in deployment RG, link references VNet by full resource ID
+   ```bicep
+   virtualNetwork: {
+     id: resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks', vnetName)
+   }
+   ```
+
+10. **PostgreSQL Subnet Delegation** (`deployments/vm/tts-docker-deployment.bicep:352`):
+    - Database subnet **MUST** be delegated to `Microsoft.DBforPostgreSQL/flexibleServers`
+    - Use 5-parameter `resourceId()` for cross-RG subnets (brownfield)
+    - Resource ID format: `resourceId(subscriptionId, resourceGroup, type, vnetName, subnetName)`
+    - Incorrect format causes "InternalServerError" during PostgreSQL deployment
+
+11. **PostgreSQL Dependency Chain** (`deployments/vm/tts-docker-deployment.bicep:354`):
+    - Use `privateDnsZone.id` (symbolic reference) NOT `resourceId()` string
+    - Symbolic reference creates implicit Bicep dependency
+    - Ensures Private DNS zone exists before PostgreSQL deployment
+    - Without this: deployment fails with resource not found errors
+
+12. **Database Initialization with Explicit URI** (`deployments/vm/tts-docker-deployment.bicep:824-833`):
+    - **CRITICAL**: All `is-db` commands MUST include `--is.database-uri` flag
+    - Without flag, commands try localhost:5432 instead of Azure PostgreSQL
+    - Required for: `is-db migrate`, `create-admin-user`, `create-oauth-client`
+    - Symptom: "driver error" on login, database tables don't exist
+    ```bash
+    docker exec stack_1 ttn-lw-stack is-db migrate \
+      --is.database-uri='postgresql://user:pass@server/db?sslmode=require'
+    ```
+
 ### 2. Bicep Template Structure
 
-**Primary Template**: `deployments/vm/tts-docker-deployment.bicep` (852 lines)
+**Primary Template**: `deployments/vm/tts-docker-deployment.bicep` (900 lines)
 
 **Key Sections**:
-- Lines 1-50: Parameter definitions with security decorators (@secure, @minValue, etc.)
+- Lines 1-98: Parameter definitions with security decorators (@secure, @minValue, etc.)
+- Line 97: `useAzureDNS` parameter (FIX #8 - critical for brownfield)
+- Line 123: Database password sanitization (removes @, !, # from VM admin password)
 - Lines 103-165: NSG rules (SSH restricted, LoRaWAN UDP 1700, HTTPS, gRPC ports)
+- Lines 265-270: Private DNS zone (always in deployment RG)
+- Lines 273-283: VNet link to Private DNS zone (supports cross-RG VNets)
+- Lines 299-324: NIC resource with NSG and DNS settings (FIX #8)
+- Lines 351-357: PostgreSQL network config with delegated subnet (FIX #10, #11)
 - Lines 406-450: Key Vault secrets (if enabled)
 - Lines 530-700: cloud-init script embedded in `customData` (YAML-safe, no heredocs)
-- Lines 782: Admin user creation with `--password` flag (FIX #7)
+- Lines 673: Database URI in TTS config (uses sanitized password)
+- Lines 812: Container health check wait loop (FIX #6)
+- Lines 824: Database migration with explicit URI (FIX #12)
+- Lines 826: Admin user creation with `--password` and `--is.database-uri` flags (FIX #7, #12)
+- Lines 831: OAuth client creation with explicit URI (FIX #12)
 
 **When modifying cloud-init**:
 - Use cron for scheduled tasks, **never** heredocs (breaks YAML parser)
+- All `docker exec` commands that modify state should use `sudo` prefix
+- All `is-db` commands MUST include `--is.database-uri` flag (FIX #12)
+- Database URI format: `postgresql://{username}:{sanitized-password}@{server}/ttn_lorawan?sslmode=require`
 - Reference: `docs/archive/CLOUD-INIT-FIX.md` for historical context
 
 ### 3. PowerShell Orchestration Patterns
@@ -174,15 +232,17 @@ az deployment group show -g <rg-name> -n <deployment-name>
 | `README.md` | User-facing deployment guide | New user onboarding |
 | `docs/ARCHITECTURE.md` | Technical deep-dive (2,528 lines) | Understanding infrastructure |
 | `docs/DEPLOYMENT_ORCHESTRATION.md` | Orchestrator system guide | Understanding deploy.ps1 hierarchy |
-| `DEPLOYMENT_FIXES_SUMMARY.md` | All 7 critical fixes | **Before any Bicep changes** |
+| `DEPLOYMENT_FIXES_SUMMARY.md` | All 12 critical fixes | **Before any Bicep changes** |
+| `docs/BROWNFIELD_DNS_CONFIGURATION.md` | DNS configuration for brownfield | Brownfield deployments, DNS issues |
 | `SECURITY_HARDENING.md` | Production security guide | Security reviews |
 
 ### Key Files to Understand
 
 **Must Read Before Changes**:
-- `deployments/vm/tts-docker-deployment.bicep` - Core infrastructure (852 lines, includes all 7 fixes)
-- `deployments/vm/deploy-simple.ps1` - Standard orchestration (316 lines, Key Vault + secrets)
+- `deployments/vm/tts-docker-deployment.bicep` - Core infrastructure (900 lines, includes all 12 fixes)
+- `deployments/vm/deploy-simple.ps1` - Standard orchestration (1120 lines, Key Vault + secrets + DNS config)
 - `deploy.ps1` - Primary entry point (menu system)
+- `docs/BROWNFIELD_DNS_CONFIGURATION.md` - DNS troubleshooting for brownfield deployments
 
 **Reference for Patterns**:
 - `deployments/kubernetes/tts-aks-deployment.bicep` - AKS infrastructure patterns
@@ -230,11 +290,15 @@ services:
 
 ❌ **Never** bypass `deploy.ps1` and call sub-scripts directly (breaks orchestration)  
 ❌ **Never** use `printf` for admin user password (FIX #7 - causes login failure)  
+❌ **Never** omit `--is.database-uri` flag from `is-db` commands (FIX #12 - causes "driver error")  
 ❌ **Never** set SSH `adminSourceIP` to `*` in production (security risk)  
 ❌ **Never** use heredocs in cloud-init YAML (breaks parser - see CLOUD-INIT-FIX.md)  
 ❌ **Never** modify Key Vault secrets list without updating all 8 references  
 ❌ **Never** change cookie key length from 64 hex chars (breaks session management)  
-❌ **Never** suggest Container Apps (UDP port 1700 not supported - see architecture docs)
+❌ **Never** suggest Container Apps (UDP port 1700 not supported - see architecture docs)  
+❌ **Never** deploy to brownfield VNet without checking DNS configuration (FIX #8)  
+❌ **Never** use `resourceId()` string for `privateDnsZoneArmResourceId` (use `.id` property - FIX #11)  
+❌ **Never** use 4-parameter `resourceId()` for cross-RG subnets (use 5-parameter - FIX #10)
 
 ## Production Deployment Checklist
 
@@ -365,4 +429,4 @@ When requirements are unclear:
 
 ---
 
-**Remember**: This codebase is production-ready with 7 critical fixes. Preserve these fixes in all modifications. When in doubt, reference `DEPLOYMENT_FIXES_SUMMARY.md`. For AKS architecture details, see `docs/ARCHITECTURE.md` Section 13.
+**Remember**: This codebase is production-ready with 12 critical fixes. Preserve these fixes in all modifications. When in doubt, reference `DEPLOYMENT_FIXES_SUMMARY.md`. For brownfield DNS issues, see `docs/BROWNFIELD_DNS_CONFIGURATION.md`. For AKS architecture details, see `docs/ARCHITECTURE.md` Section 13.

@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 900">
+  <defs>
+    <style>
+      .decision-box { fill: #FFE082; stroke: #F57F17; stroke-width: 2; }
+      .action-box { fill: #81C784; stroke: #388E3C; stroke-width: 2; }
+      .error-box { fill: #EF5350; stroke: #C62828; stroke-width: 2; }
+      .info-box { fill: #64B5F6; stroke: #1976D2; stroke-width: 2; }
+      .text-black { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; font-weight: 600; text-anchor: middle; }
+      .text-small { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; text-anchor: middle; }
+      .text-white { fill: white; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; font-weight: 600; text-anchor: middle; }
+      .title { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 22px; font-weight: 700; }
+      .arrow { stroke: #333; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .label { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; font-weight: 600; }
+      .code { fill: #333; font-family: 'Courier New', monospace; font-size: 10px; text-anchor: middle; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="500" y="35" class="title" text-anchor="middle">Brownfield DNS Configuration Decision Tree</text>
+  
+  <!-- Start -->
+  <rect x="350" y="60" width="300" height="70" rx="5" class="info-box"/>
+  <text x="500" y="88" class="text-white">Deploying into</text>
+  <text x="500" y="105" class="text-white">Existing VNet?</text>
+  <text x="500" y="122" class="text-white" font-size="10">(Brownfield Scenario)</text>
+  
+  <path d="M 500 130 L 500 160" class="arrow"/>
+  
+  <!-- Decision 1: Custom DNS? -->
+  <rect x="325" y="160" width="350" height="80" rx="5" class="decision-box"/>
+  <text x="500" y="188" class="text-black">Does VNet have</text>
+  <text x="500" y="208" class="text-black">Custom DNS Servers?</text>
+  <text x="500" y="228" class="text-small">(Check VNet → DNS servers in Azure Portal)</text>
+  
+  <!-- Yes branch -->
+  <path d="M 325 200 L 200 300" class="arrow"/>
+  <text x="240" y="245" class="label">YES</text>
+  <text x="240" y="260" class="text-small">(Corporate DNS)</text>
+  
+  <!-- No branch -->
+  <path d="M 675 200 L 800 300" class="arrow"/>
+  <text x="760" y="245" class="label">NO</text>
+  <text x="760" y="260" class="text-small">(Default/Azure DNS)</text>
+  
+  <!-- Left path (Custom DNS) - Problem -->
+  <rect x="50" y="300" width="300" height="110" rx="5" class="error-box"/>
+  <text x="200" y="330" class="text-white">⚠️ PROBLEM</text>
+  <text x="200" y="350" class="text-white" font-size="11">Custom DNS servers cannot</text>
+  <text x="200" y="365" class="text-white" font-size="11">resolve Azure Private DNS zones</text>
+  <text x="200" y="385" class="text-small" fill="white">Without fix: "no such host" error</text>
+  <text x="200" y="400" class="text-small" fill="white">TTS container restart loop</text>
+  
+  <path d="M 200 410 L 200 450" class="arrow"/>
+  
+  <!-- Solution: useAzureDNS=true -->
+  <rect x="50" y="450" width="300" height="130" rx="5" class="action-box"/>
+  <text x="200" y="478" class="text-white">✅ SOLUTION</text>
+  <text x="200" y="498" class="text-white" font-size="11">Set useAzureDNS = true</text>
+  <line x1="60" y1="508" x2="340" y2="508" stroke="white" stroke-width="1"/>
+  <text x="200" y="525" class="code" fill="white">-UseAzureDNS $true</text>
+  <line x1="60" y1="535" x2="340" y2="535" stroke="white" stroke-width="1"/>
+  <text x="200" y="552" class="text-small" fill="white">VM NIC uses Azure DNS</text>
+  <text x="200" y="567" class="text-small" fill="white">(168.63.129.16)</text>
+  
+  <path d="M 200 580 L 200 650" class="arrow"/>
+  
+  <!-- Right path (No Custom DNS) - Default OK -->
+  <rect x="650" y="300" width="300" height="80" rx="5" class="action-box"/>
+  <text x="800" y="330" class="text-white">✅ DEFAULT OK</text>
+  <text x="800" y="350" class="text-white" font-size="11">No custom DNS configuration</text>
+  <text x="800" y="365" class="text-white" font-size="11">Azure DNS resolves private zones</text>
+  
+  <path d="M 800 380 L 800 650" class="arrow"/>
+  
+  <!-- Converge: Private DNS Zone Link -->
+  <rect x="200" y="650" width="600" height="90" rx="5" class="info-box"/>
+  <text x="500" y="678" class="text-white" font-size="14">Critical: Private DNS Zone VNet Link</text>
+  <line x1="210" y1="688" x2="790" y2="688" stroke="white" stroke-width="1"/>
+  <text x="500" y="708" class="text-white" font-size="11">privatelink.postgres.database.azure.com</text>
+  <text x="500" y="725" class="text-white" font-size="11">MUST be linked to VNet (supports cross-RG)</text>
+  
+  <path d="M 500 740 L 500 780" class="arrow"/>
+  
+  <!-- Final Result -->
+  <rect x="200" y="780" width="600" height="80" rx="5" class="action-box"/>
+  <text x="500" y="810" class="text-white" font-size="15">✅ Deployment Success</text>
+  <text x="500" y="830" class="text-white" font-size="11">VM resolves PostgreSQL FQDN to private IP</text>
+  <text x="500" y="847" class="text-white" font-size="11">TTS connects to database successfully</text>
+  
+  <!-- Key Parameters Box -->
+  <rect x="50" y="620" width="130" height="100" rx="5" fill="#FFF3E0" stroke="#E65100" stroke-width="2"/>
+  <text x="115" y="640" class="text-black" font-size="11">Key Parameters</text>
+  <line x1="60" y1="648" x2="170" y2="648" stroke="#E65100" stroke-width="1"/>
+  <text x="115" y="665" class="code">useAzureDNS</text>
+  <text x="115" y="680" class="code">vnetName</text>
+  <text x="115" y="695" class="code">vnetResourceGroup</text>
+  <text x="115" y="710" class="code">subnetName</text>
+</svg>

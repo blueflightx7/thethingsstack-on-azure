@@ -35,6 +35,9 @@ param vmSize string = 'Standard_B4ms'
 @description('Domain name for TTS (will be auto-generated if not provided)')
 param domainName string = ''
 
+@description('DNS name prefix for Azure public IP (will be auto-generated if not provided)')
+param dnsNamePrefix string = ''
+
 @description('Name of existing Key Vault containing secrets (optional)')
 param keyVaultName string = ''
 
@@ -50,6 +53,9 @@ param enablePrivateDatabaseAccess bool = true
 @description('Enable Key Vault for secrets management (recommended for production)')
 param enableKeyVault bool = true
 
+@description('Enable Log Analytics monitoring (may be blocked by policy in some subscriptions)')
+param enableMonitoring bool = true
+
 @description('TTS admin password for console access')
 @secure()
 param ttsAdminPasswordParam string
@@ -64,6 +70,33 @@ param cookieBlockKey string = ''
 @secure()
 param oauthClientSecret string = ''
 
+@description('Use existing VNet instead of creating a new one')
+param useExistingVNet bool = false
+
+@description('Name of existing VNet (required if useExistingVNet is true)')
+param existingVNetName string = ''
+
+@description('Resource group containing the existing VNet (defaults to deployment RG if empty)')
+param existingVNetResourceGroup string = ''
+
+@description('Name of existing subnet in the VNet (required if useExistingVNet is true)')
+param existingSubnetName string = ''
+
+@description('Name of existing database subnet with PostgreSQL delegation (required if useExistingVNet is true)')
+param existingDatabaseSubnetName string = ''
+
+@description('Create a new subnet in the existing VNet')
+param createSubnetInExistingVNet bool = false
+
+@description('Name for new subnet to create in existing VNet')
+param newSubnetName string = 'tts-subnet'
+
+@description('Address prefix for new subnet (e.g., 10.0.5.0/24)')
+param newSubnetAddressPrefix string = '10.0.5.0/24'
+
+@description('Use Azure DNS (168.63.129.16) on VM instead of VNet DNS servers - required for private DNS zone resolution')
+param useAzureDNS bool = true
+
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -71,14 +104,20 @@ param oauthClientSecret string = ''
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location)
 var vmName = '${environmentName}-vm-${resourceToken}'
 var nicName = '${vmName}-nic'
-var vnetName = '${environmentName}-vnet-${resourceToken}'
-var subnetName = 'default'
+var vnetName = useExistingVNet ? existingVNetName : '${environmentName}-vnet-${resourceToken}'
+var subnetName = useExistingVNet ? existingSubnetName : 'default'
+var databaseSubnetName = useExistingVNet ? existingDatabaseSubnetName : 'database-subnet'
+var vnetResourceGroup = useExistingVNet && !empty(existingVNetResourceGroup) ? existingVNetResourceGroup : resourceGroup().name
 var nsgName = '${environmentName}-nsg-${resourceToken}'
 var pipName = '${vmName}-pip'
 var dbServerName = '${environmentName}-db-${resourceToken}'
 
-// Domain configuration
-var actualDomainName = empty(domainName) ? '${environmentName}-${resourceToken}.${location}.cloudapp.azure.com' : domainName
+// DNS and Domain configuration
+// DNS prefix for public IP (lowercase, no dots)
+var defaultDnsPrefix = '${environmentName}-${resourceToken}'
+var actualDnsPrefix = empty(dnsNamePrefix) ? defaultDnsPrefix : dnsNamePrefix
+// Domain name for TTS (can include dots)
+var actualDomainName = empty(domainName) ? '${actualDnsPrefix}.${location}.cloudapp.azure.com' : domainName
 
 // FIX #1: Generate alphanumeric-only password for PostgreSQL
 var dbPassword = replace(replace(replace(adminPassword, '!', ''), '@', ''), '#', '')
@@ -91,6 +130,11 @@ var ttsAdminUsername = 'ttsadmin'
 var actualCookieHashKey = empty(cookieHashKey) ? toUpper(take(replace(replace(uniqueString(resourceGroup().id, 'hash', deployment().name), '-', ''), '_', ''), 64)) : cookieHashKey
 var actualCookieBlockKey = empty(cookieBlockKey) ? toUpper(take(replace(replace(uniqueString(resourceGroup().id, 'block', deployment().name), '-', ''), '_', ''), 64)) : cookieBlockKey
 var actualOauthSecret = empty(oauthClientSecret) ? 'console' : oauthClientSecret
+
+// Target VNet resource ID - handles both greenfield (new VNet) and brownfield (existing VNet in different RG)
+var targetVnetResourceId = useExistingVNet 
+  ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks', vnetName)
+  : resourceId('Microsoft.Network/virtualNetworks', vnetName)
 
 // ============================================================================
 // NETWORKING
@@ -163,6 +207,19 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-04-01' = {
           sourceAddressPrefix: '*'
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
+          destinationPortRange: '1881-1887'
+        }
+      }
+      {
+        name: 'AllowClusterGRPC'
+        properties: {
+          priority: 1005
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
           destinationPortRange: '8884'
         }
       }
@@ -170,12 +227,16 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-04-01' = {
   }
 }
 
-resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
+// Reference to existing VNet (if using existing)
+resource existingVnet 'Microsoft.Network/virtualNetworks@2023-04-01' existing = if (useExistingVNet) {
+  name: vnetName
+  scope: resourceGroup(vnetResourceGroup)
+}
+
+// New VNet (only created if not using existing)
+resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = if (!useExistingVNet) {
   name: vnetName
   location: location
-  dependsOn: [
-    nsg
-  ]
   properties: {
     addressSpace: {
       addressPrefixes: [
@@ -210,11 +271,13 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
   }
 }
 
+// Private DNS zone - always create in deployment RG (deleted with RG cleanup)
 resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = if (enablePrivateDatabaseAccess) {
   name: 'privatelink.postgres.database.azure.com'
   location: 'global'
 }
 
+// VNet link - works for both greenfield and brownfield (cross-RG VNet)
 resource privateDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = if (enablePrivateDatabaseAccess) {
   parent: privateDnsZone
   name: '${vnetName}-link'
@@ -222,7 +285,7 @@ resource privateDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLin
   properties: {
     registrationEnabled: false
     virtualNetwork: {
-      id: vnet.id
+      id: targetVnetResourceId
     }
   }
 }
@@ -236,7 +299,7 @@ resource pip 'Microsoft.Network/publicIPAddresses@2023-04-01' = {
   properties: {
     publicIPAllocationMethod: 'Static'
     dnsSettings: {
-      domainNameLabel: '${environmentName}-${resourceToken}'
+      domainNameLabel: actualDnsPrefix
     }
   }
 }
@@ -244,11 +307,15 @@ resource pip 'Microsoft.Network/publicIPAddresses@2023-04-01' = {
 resource nic 'Microsoft.Network/networkInterfaces@2023-04-01' = {
   name: nicName
   location: location
-  dependsOn: [
-    pip
-    vnet
-  ]
   properties: {
+    networkSecurityGroup: {
+      id: nsg.id
+    }
+    dnsSettings: useAzureDNS ? {
+      dnsServers: [
+        '168.63.129.16'
+      ]
+    } : null
     ipConfigurations: [
       {
         name: 'ipconfig1'
@@ -258,7 +325,9 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-04-01' = {
             id: pip.id
           }
           subnet: {
-            id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)
+            id: useExistingVNet 
+              ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)
+              : resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, subnetName)
           }
         }
       }
@@ -274,9 +343,9 @@ resource dbServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview'
   name: dbServerName
   location: location
   dependsOn: [
-    privateDnsZone
     privateDnsZoneLink
   ]
+  // Implicit dependency through privateDnsZone.id reference (line 328)
   sku: {
     name: 'Standard_B1ms'
     tier: 'Burstable'
@@ -291,7 +360,9 @@ resource dbServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview'
       storageSizeGB: 32
     }
     network: enablePrivateDatabaseAccess ? {
-      delegatedSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'database-subnet')
+      delegatedSubnetResourceId: useExistingVNet 
+        ? resourceId(subscription().subscriptionId, vnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', vnetName, databaseSubnetName)
+        : resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, databaseSubnetName)
       privateDnsZoneArmResourceId: privateDnsZone.id
       publicNetworkAccess: 'Disabled'
     } : {
@@ -317,7 +388,7 @@ resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-06-0
 // MONITORING
 // ============================================================================
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (enableMonitoring) {
   name: '${environmentName}-logs'
   location: location
   tags: {
@@ -334,23 +405,20 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (enableMonitoring) {
   name: '${environmentName}-appinsights'
   location: location
-  dependsOn: [
-    logAnalytics
-  ]
   tags: {
     'azd-env-name': environmentName
   }
   kind: 'web'
   properties: {
     Application_Type: 'web'
-    WorkspaceResourceId: logAnalytics.id
+    WorkspaceResourceId: enableMonitoring ? logAnalytics.id : ''
   }
 }
 
-resource securityAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = {
+resource securityAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = if (enableMonitoring) {
   name: '${environmentName}-security-alert'
   location: 'Global'
   tags: {
@@ -380,27 +448,11 @@ resource securityAlert 'Microsoft.Insights/activityLogAlerts@2020-10-01' = {
 // KEY VAULT
 // ============================================================================
 
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = if (enableKeyVault) {
+// Reference existing Key Vault created by PowerShell script
+// The deploy-simple.ps1 script creates the Key Vault with proper settings
+// before running this Bicep template, so we just reference it here
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = if (enableKeyVault) {
   name: keyVaultName
-  location: location
-  properties: {
-    sku: {
-      family: 'A'
-      name: 'standard'
-    }
-    tenantId: subscription().tenantId
-    enabledForTemplateDeployment: true
-    enabledForDeployment: true
-    enabledForDiskEncryption: true
-    enableRbacAuthorization: true
-    enableSoftDelete: true
-    softDeleteRetentionInDays: 7
-    publicNetworkAccess: 'Enabled'
-    networkAcls: {
-      defaultAction: 'Allow'
-      bypass: 'AzureServices'
-    }
-  }
 }
 
 resource dbPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (enableKeyVault) {
@@ -502,10 +554,6 @@ resource firewallRule 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2
 resource vm 'Microsoft.Compute/virtualMachines@2023-03-01' = {
   name: vmName
   location: location
-  dependsOn: [
-    dbServer
-    nic
-  ]
   identity: enableKeyVault ? {
     type: 'SystemAssigned'
   } : null
@@ -729,7 +777,7 @@ runcmd:
     # Obtain certificate using standalone mode (runs temporary web server on port 80)
     echo "Obtaining Let's Encrypt certificate for {1}..."
     certbot certonly --standalone --non-interactive --agree-tos --email {8} -d {1} --http-01-port 80 \
-      --pre-hook "systemctl stop docker || true" \
+      --pre-hook "systemctl stop docker.socket docker || true" \
       --post-hook "systemctl start docker || true"
     
     # Copy Let's Encrypt certificates
@@ -745,8 +793,7 @@ runcmd:
       echo "0 0,12 * * * root certbot renew --quiet --deploy-hook 'cp /etc/letsencrypt/live/{1}/fullchain.pem /home/{0}/certs/cert.pem && cp /etc/letsencrypt/live/{1}/privkey.pem /home/{0}/certs/key.pem && chown {0}:{0} /home/{0}/certs/* && chmod 644 /home/{0}/certs/cert.pem && chmod 644 /home/{0}/certs/key.pem && cd /home/{0} && docker-compose restart stack'" > /etc/cron.d/certbot-renew
       echo "✅ Auto-renewal configured (runs twice daily)"
     else
-      echo "❌ Let's Encrypt certificate generation failed!"
-      exit 1
+      echo "⚠️ Let's Encrypt certificate generation failed - TTS will continue without valid certificates"
     fi
   
   # Add user to docker group
@@ -772,19 +819,23 @@ runcmd:
   - sleep 10
   - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db migrate && break || (echo "Database migration attempt $i failed, retrying..."; sleep 5); done
   
-  # FIX #11: Wait for TTS container to be fully ready before creating admin user
+  # FIX #11: Wait for TTS container to be fully ready before database operations
   - echo "Waiting for TTS container to be fully ready..."
   - sleep 30
   - for i in $(seq 1 10); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db --help >/dev/null 2>&1 && break || (echo "Waiting for TTS to be ready (attempt $i/10)..."; sleep 10); done
   
-  # FIX #10 & #11: Create admin user with retry logic using --password flag
-  - echo "Creating admin user..."
-  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-admin-user --id {10} --email {8} --password '{9}' && break || (echo "Admin user creation attempt $i failed, retrying in 10 seconds..."; sleep 10); done
+  # FIX #12: Initialize Identity Server database with explicit URI
+  - echo "Initializing Identity Server database..."
+  - docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db migrate --is.database-uri='postgresql://{0}:{4}@{5}/ttn_lorawan?sslmode=require' || echo "Database migration failed or already migrated"
   
-  # FIX #8 & #9: Create OAuth client for console with retry logic (single redirect URI)
+  # FIX #10 & #11: Create admin user with retry logic using --password flag and explicit database URI
+  - echo "Creating admin user..."
+  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-admin-user --id {10} --email {8} --password '{9}' --is.database-uri='postgresql://{0}:{4}@{5}/ttn_lorawan?sslmode=require' && break || (echo "Admin user creation attempt $i failed, retrying in 10 seconds..."; sleep 10); done
+  
+  # FIX #8 & #9: Create OAuth client for console with retry logic and explicit database URI
   - echo "Creating OAuth client for console..."
   - sleep 5
-  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-oauth-client --id console --name 'Console' --secret 'console' --owner {10} --redirect-uri '/console/oauth/callback' --logout-redirect-uri '/console' && break || (echo "OAuth client creation attempt $i failed, retrying..."; sleep 5); done
+  - for i in $(seq 1 5); do docker exec {0}_stack_1 ttn-lw-stack -c /config/tts.yml is-db create-oauth-client --id console --name 'Console' --secret 'console' --owner {10} --redirect-uri 'https://{1}/console/oauth/callback' --redirect-uri 'https://{1}/oauth/callback' --redirect-uri '/console/oauth/callback' --redirect-uri '/oauth/callback' --logout-redirect-uri 'https://{1}/console' --logout-redirect-uri '/console' --is.database-uri='postgresql://{0}:{4}@{5}/ttn_lorawan?sslmode=require' && break || (echo "OAuth client creation attempt $i failed, retrying..."; sleep 5); done
   
   # Final verification of complete setup
   - echo "Performing final database verification..."
@@ -841,11 +892,15 @@ output adminCredentials object = {
   consoleUrl: 'https://${actualDomainName}/console'
 }
 output quickStartGuide string = 'SSH to ${pip.properties.ipAddress} and run: docker logs ${adminUsername}_stack_1 -f to monitor deployment progress'
-output logAnalyticsWorkspaceId string = logAnalytics.id
-output applicationInsightsInstrumentationKey string = appInsights.properties.InstrumentationKey
-output applicationInsightsConnectionString string = appInsights.properties.ConnectionString
-output securityMonitoring object = {
+output logAnalyticsWorkspaceId string = enableMonitoring ? logAnalytics.id : ''
+output applicationInsightsInstrumentationKey string = enableMonitoring ? appInsights!.properties.InstrumentationKey : ''
+output applicationInsightsConnectionString string = enableMonitoring ? appInsights!.properties.ConnectionString : ''
+output securityMonitoring object = enableMonitoring ? {
   logAnalyticsWorkspace: logAnalytics.name
   applicationInsights: appInsights.name
   securityAlert: securityAlert.name
+} : {
+  logAnalyticsWorkspace: 'Monitoring disabled'
+  applicationInsights: 'Monitoring disabled'
+  securityAlert: 'Monitoring disabled'
 }

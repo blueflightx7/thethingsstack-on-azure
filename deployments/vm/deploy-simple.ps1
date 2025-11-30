@@ -82,6 +82,14 @@ if ([string]::IsNullOrEmpty($DomainName)) {
     $DomainName = Read-Host
 }
 
+# Prompt for DNS name prefix if custom domain not provided
+$DnsNamePrefix = ""
+if ([string]::IsNullOrEmpty($DomainName)) {
+    Write-Host "`nDNS name prefix for Azure public IP (leave empty for auto-generated):" -ForegroundColor Yellow
+    Write-Host "  Example: 'my-tts' will create 'my-tts.eastus.cloudapp.azure.com'" -ForegroundColor Gray
+    $DnsNamePrefix = Read-Host
+}
+
 # Prompt for passwords securely
 Write-Host "`nEnter VM/Database admin password (alphanumeric only, 12+ chars):" -ForegroundColor Yellow
 $vmAdminPassword = Read-Host -AsSecureString
@@ -139,46 +147,80 @@ Write-Host "`nSTEP 2: Resource Group Configuration`n" -ForegroundColor Yellow
 
 # Check if user wants to use existing resource group
 if ([string]::IsNullOrEmpty($ResourceGroupName)) {
-    $useExisting = Read-Host "Do you have an existing resource group to use? (y/N)"
+    Write-Host "Resource Group Options:" -ForegroundColor Cyan
+    Write-Host "  1. Enter resource group name manually" -ForegroundColor White
+    Write-Host "  2. Select from existing resource groups" -ForegroundColor White
+    Write-Host "  3. Create new resource group automatically`n" -ForegroundColor White
     
-    if ($useExisting -eq 'y' -or $useExisting -eq 'Y') {
-        # List available resource groups
-        Write-Host "`nFetching available resource groups..." -ForegroundColor Cyan
-        $existingRGs = Get-AzResourceGroup | Select-Object -ExpandProperty ResourceGroupName
-        
-        if ($existingRGs.Count -eq 0) {
-            Write-Host "No existing resource groups found. Creating a new one." -ForegroundColor Yellow
-            $useExisting = 'n'
-        } else {
-            Write-Host "`nAvailable Resource Groups:" -ForegroundColor Cyan
-            for ($i = 0; $i -lt $existingRGs.Count; $i++) {
-                Write-Host "  $($i + 1). $($existingRGs[$i])" -ForegroundColor White
-            }
+    $rgOption = Read-Host "Select option (1-3, default: 3)"
+    
+    switch ($rgOption) {
+        "1" {
+            # Manual entry
+            $ResourceGroupName = Read-Host "Enter resource group name"
             
-            $rgChoice = Read-Host "`nSelect resource group (1-$($existingRGs.Count)), or press Enter to create new"
-            
-            if ($rgChoice -and $rgChoice -match '^\d+$' -and [int]$rgChoice -le $existingRGs.Count -and [int]$rgChoice -gt 0) {
-                $ResourceGroupName = $existingRGs[[int]$rgChoice - 1]
-                Write-Host "✓ Using existing resource group: $ResourceGroupName" -ForegroundColor Green
-                
-                # Get location from existing RG
-                $existingRG = Get-AzResourceGroup -Name $ResourceGroupName
+            $existingRG = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue
+            if ($existingRG) {
+                Write-Host "✓ Found existing resource group: $ResourceGroupName" -ForegroundColor Green
                 $Location = $existingRG.Location
                 Write-Host "  Location: $Location" -ForegroundColor Gray
+                
+                $confirm = Read-Host "Use this resource group? (Y/n)"
+                if ($confirm -eq 'n' -or $confirm -eq 'N') {
+                    Write-Error "Deployment cancelled by user"
+                    exit 1
+                }
             } else {
-                $useExisting = 'n'
+                Write-Host "Resource group '$ResourceGroupName' not found." -ForegroundColor Yellow
+                $create = Read-Host "Create it? (Y/n)"
+                if ($create -ne 'n' -and $create -ne 'N') {
+                    New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force | Out-Null
+                    Write-Host "✓ Resource group created" -ForegroundColor Green
+                } else {
+                    Write-Error "Deployment cancelled by user"
+                    exit 1
+                }
             }
         }
-    }
-    
-    # Create new resource group if not using existing
-    if ($useExisting -ne 'y' -and $useExisting -ne 'Y') {
-        $timestamp = Get-Date -Format "yyyyMMddHHmm"
-        $ResourceGroupName = "rg-tts-$timestamp"
-        
-        Write-Host "Creating new resource group: $ResourceGroupName" -ForegroundColor Cyan
-        New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force | Out-Null
-        Write-Host "✓ Resource group created" -ForegroundColor Green
+        "2" {
+            # List and select
+            Write-Host "`nFetching available resource groups..." -ForegroundColor Cyan
+            $existingRGs = Get-AzResourceGroup | Select-Object ResourceGroupName, Location
+            
+            if ($existingRGs.Count -eq 0) {
+                Write-Host "No existing resource groups found. Creating a new one." -ForegroundColor Yellow
+                $timestamp = Get-Date -Format "yyyyMMddHHmm"
+                $ResourceGroupName = "rg-tts-$timestamp"
+                New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force | Out-Null
+                Write-Host "✓ Resource group created: $ResourceGroupName" -ForegroundColor Green
+            } else {
+                Write-Host "`nAvailable Resource Groups:" -ForegroundColor Cyan
+                for ($i = 0; $i -lt $existingRGs.Count; $i++) {
+                    Write-Host "  $($i + 1). $($existingRGs[$i].ResourceGroupName) ($($existingRGs[$i].Location))" -ForegroundColor White
+                }
+                
+                $rgChoice = Read-Host "`nSelect resource group (1-$($existingRGs.Count))"
+                
+                if ($rgChoice -and $rgChoice -match '^\d+$' -and [int]$rgChoice -le $existingRGs.Count -and [int]$rgChoice -gt 0) {
+                    $ResourceGroupName = $existingRGs[[int]$rgChoice - 1].ResourceGroupName
+                    $Location = $existingRGs[[int]$rgChoice - 1].Location
+                    Write-Host "✓ Using resource group: $ResourceGroupName" -ForegroundColor Green
+                    Write-Host "  Location: $Location" -ForegroundColor Gray
+                } else {
+                    Write-Error "Invalid selection"
+                    exit 1
+                }
+            }
+        }
+        default {
+            # Create new (option 3 or Enter)
+            $timestamp = Get-Date -Format "yyyyMMddHHmm"
+            $ResourceGroupName = "rg-tts-$timestamp"
+            
+            Write-Host "Creating new resource group: $ResourceGroupName" -ForegroundColor Cyan
+            New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force | Out-Null
+            Write-Host "✓ Resource group created" -ForegroundColor Green
+        }
     }
 } else {
     # Resource group name provided via parameter
@@ -201,69 +243,523 @@ if ([string]::IsNullOrEmpty($ResourceGroupName)) {
 Write-Host "`nSTEP 3: Network Configuration`n" -ForegroundColor Yellow
 
 $createNewVNet = $true
+$vnetResourceGroup = $ResourceGroupName
 $vnetResourceId = ""
 $subnetResourceId = ""
+$selectedVNet = $null
+$selectedSubnet = $null
 
 # Check if user wants to use existing VNet
 if ([string]::IsNullOrEmpty($VNetName)) {
-    $useExistingVNet = Read-Host "Do you have an existing VNet and Subnet to use? (y/N)"
+    Write-Host "Network Options:" -ForegroundColor Cyan
+    Write-Host "  1. Enter VNet and Subnet names manually" -ForegroundColor White
+    Write-Host "  2. Select from VNets in current resource group ($ResourceGroupName)" -ForegroundColor White
+    Write-Host "  3. Search all VNets across subscription" -ForegroundColor White
+    Write-Host "  4. Create new VNet automatically`n" -ForegroundColor White
     
-    if ($useExistingVNet -eq 'y' -or $useExistingVNet -eq 'Y') {
-        # List available VNets in the resource group
-        Write-Host "`nFetching available VNets in $ResourceGroupName..." -ForegroundColor Cyan
-        $existingVNets = Get-AzVirtualNetwork -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue
-        
-        if ($existingVNets.Count -eq 0) {
-            Write-Host "No existing VNets found in this resource group. New VNet will be created." -ForegroundColor Yellow
-            $createNewVNet = $true
-        } else {
-            Write-Host "`nAvailable VNets:" -ForegroundColor Cyan
-            for ($i = 0; $i -lt $existingVNets.Count; $i++) {
-                Write-Host "  $($i + 1). $($existingVNets[$i].Name) - $($existingVNets[$i].AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor White
+    $netOption = Read-Host "Select option (1-4, default: 4)"
+    
+    switch ($netOption) {
+        "1" {
+            # Manual entry
+            $VNetName = Read-Host "Enter VNet name"
+            $vnetRgInput = Read-Host "Enter VNet resource group name (press Enter for current RG: $ResourceGroupName)"
+            if ([string]::IsNullOrEmpty($vnetRgInput)) {
+                $vnetResourceGroup = $ResourceGroupName
+            } else {
+                $vnetResourceGroup = $vnetRgInput
             }
             
-            $vnetChoice = Read-Host "`nSelect VNet (1-$($existingVNets.Count)), or press Enter to create new"
+            # Try to find the VNet
+            $selectedVNet = Get-AzVirtualNetwork -Name $VNetName -ResourceGroupName $vnetResourceGroup -ErrorAction SilentlyContinue
             
-            if ($vnetChoice -and $vnetChoice -match '^\d+$' -and [int]$vnetChoice -le $existingVNets.Count -and [int]$vnetChoice -gt 0) {
-                $selectedVNet = $existingVNets[[int]$vnetChoice - 1]
-                $VNetName = $selectedVNet.Name
-                $vnetResourceId = $selectedVNet.Id
+            if ($selectedVNet) {
+                Write-Host "✓ Found VNet: $VNetName in $vnetResourceGroup" -ForegroundColor Green
+                Write-Host "  Address Space: $($selectedVNet.AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor Gray
                 
-                Write-Host "✓ Selected VNet: $VNetName" -ForegroundColor Green
+                # CRITICAL: Update location to match VNet's location
+                $vnetLocation = $selectedVNet.Location
+                if ($Location -ne $vnetLocation) {
+                    Write-Host "  ⚠ VNet is in region: $vnetLocation" -ForegroundColor Yellow
+                    Write-Host "  Deployment location changed from $Location to $vnetLocation (resources must be in same region as VNet)" -ForegroundColor Yellow
+                    $Location = $vnetLocation
+                }
                 
-                # List subnets
+                # Get subnet
                 if ($selectedVNet.Subnets.Count -eq 0) {
-                    Write-Host "  No subnets found in this VNet. New VNet will be created." -ForegroundColor Yellow
-                    $createNewVNet = $true
+                    Write-Host "  No subnets found in VNet" -ForegroundColor Yellow
+                    $createSubnet = Read-Host "  Create new subnet? (Y/n)"
+                    if ($createSubnet -ne 'n' -and $createSubnet -ne 'N') {
+                        $SubnetName = Read-Host "  Enter subnet name (default: tts-subnet)"
+                        if ([string]::IsNullOrEmpty($SubnetName)) { $SubnetName = "tts-subnet" }
+                        Write-Host "  ✓ New subnet '$SubnetName' will be created" -ForegroundColor Green
+                        $createNewVNet = $false
+                    } else {
+                        Write-Error "Cannot proceed without a subnet"
+                        exit 1
+                    }
                 } else {
+                    # List subnets
                     Write-Host "`n  Available Subnets:" -ForegroundColor Cyan
                     for ($i = 0; $i -lt $selectedVNet.Subnets.Count; $i++) {
-                        Write-Host "    $($i + 1). $($selectedVNet.Subnets[$i].Name) - $($selectedVNet.Subnets[$i].AddressPrefix)" -ForegroundColor White
+                        $subnet = $selectedVNet.Subnets[$i]
+                        Write-Host "    $($i + 1). $($subnet.Name) - $($subnet.AddressPrefix)" -ForegroundColor White
+                        
+                        # Check for delegations
+                        if ($subnet.Delegations.Count -gt 0) {
+                            Write-Host "       ⚠ Delegated to: $($subnet.Delegations[0].ServiceName)" -ForegroundColor Yellow
+                        }
                     }
                     
-                    $subnetChoice = Read-Host "`n  Select Subnet (1-$($selectedVNet.Subnets.Count))"
+                    $subnetChoice = Read-Host "`n  Select Subnet (1-$($selectedVNet.Subnets.Count)), or 0 to create new"
                     
-                    if ($subnetChoice -and $subnetChoice -match '^\d+$' -and [int]$subnetChoice -le $selectedVNet.Subnets.Count -and [int]$subnetChoice -gt 0) {
+                    if ($subnetChoice -eq "0") {
+                        $SubnetName = Read-Host "  Enter new subnet name"
+                        Write-Host "  ✓ New subnet '$SubnetName' will be created in VNet" -ForegroundColor Green
+                        $createNewVNet = $false
+                    }
+                    elseif ($subnetChoice -and $subnetChoice -match '^\d+$' -and [int]$subnetChoice -le $selectedVNet.Subnets.Count -and [int]$subnetChoice -gt 0) {
                         $selectedSubnet = $selectedVNet.Subnets[[int]$subnetChoice - 1]
                         $SubnetName = $selectedSubnet.Name
                         $subnetResourceId = $selectedSubnet.Id
                         
-                        Write-Host "  ✓ Selected Subnet: $SubnetName" -ForegroundColor Green
+                        # Validate subnet is not delegated
+                        if ($selectedSubnet.Delegations.Count -gt 0) {
+                            Write-Host "  ⚠ WARNING: Subnet is delegated to $($selectedSubnet.Delegations[0].ServiceName)" -ForegroundColor Red
+                            Write-Host "  This may cause deployment issues if delegation is incompatible." -ForegroundColor Yellow
+                            $continueAnyway = Read-Host "  Continue anyway? (y/N)"
+                            if ($continueAnyway -ne 'y' -and $continueAnyway -ne 'Y') {
+                                Write-Error "Deployment cancelled"
+                                exit 1
+                            }
+                        }
+                        
+                        Write-Host "  ✓ Selected Subnet: $SubnetName ($($selectedSubnet.AddressPrefix))" -ForegroundColor Green
+                        $vnetResourceId = $selectedVNet.Id
                         $createNewVNet = $false
                     } else {
-                        Write-Host "  Invalid selection. New VNet will be created." -ForegroundColor Yellow
-                        $createNewVNet = $true
+                        Write-Error "Invalid subnet selection"
+                        exit 1
                     }
                 }
             } else {
-                $createNewVNet = $true
+                Write-Host "VNet '$VNetName' not found in resource group '$vnetResourceGroup'" -ForegroundColor Red
+                $createNew = Read-Host "Create new VNet? (Y/n)"
+                if ($createNew -ne 'n' -and $createNew -ne 'N') {
+                    $createNewVNet = $true
+                } else {
+                    Write-Error "Deployment cancelled"
+                    exit 1
+                }
             }
+        }
+        "2" {
+            # List VNets in current resource group
+            Write-Host "`nFetching VNets in $ResourceGroupName..." -ForegroundColor Cyan
+            $existingVNets = Get-AzVirtualNetwork -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue
+            
+            if ($existingVNets.Count -eq 0) {
+                Write-Host "No VNets found in this resource group. New VNet will be created." -ForegroundColor Yellow
+                $createNewVNet = $true
+            } else {
+                Write-Host "`nAvailable VNets:" -ForegroundColor Cyan
+                for ($i = 0; $i -lt $existingVNets.Count; $i++) {
+                    Write-Host "  $($i + 1). $($existingVNets[$i].Name) - $($existingVNets[$i].AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor White
+                }
+                
+                $vnetChoice = Read-Host "`nSelect VNet (1-$($existingVNets.Count)), or 0 to create new"
+                
+                if ($vnetChoice -eq "0") {
+                    $createNewVNet = $true
+                }
+                elseif ($vnetChoice -and $vnetChoice -match '^\d+$' -and [int]$vnetChoice -le $existingVNets.Count -and [int]$vnetChoice -gt 0) {
+                    $selectedVNet = $existingVNets[[int]$vnetChoice - 1]
+                    $VNetName = $selectedVNet.Name
+                    $vnetResourceId = $selectedVNet.Id
+                    $vnetResourceGroup = $ResourceGroupName
+                    
+                    # CRITICAL: Update location to match VNet's location
+                    $vnetLocation = $selectedVNet.Location
+                    if ($Location -ne $vnetLocation) {
+                        Write-Host "  ⚠ VNet is in region: $vnetLocation" -ForegroundColor Yellow
+                        Write-Host "  Deployment location changed from $Location to $vnetLocation (resources must be in same region as VNet)" -ForegroundColor Yellow
+                        $Location = $vnetLocation
+                    }
+                    
+                    # Continue to subnet selection (reuse logic from option 1)
+                    if ($selectedVNet.Subnets.Count -eq 0) {
+                        Write-Host "  No subnets in VNet. New subnet will be created." -ForegroundColor Yellow
+                        $SubnetName = "tts-subnet"
+                        $createNewVNet = $false
+                    } else {
+                        Write-Host "`n  Available Subnets:" -ForegroundColor Cyan
+                        for ($i = 0; $i -lt $selectedVNet.Subnets.Count; $i++) {
+                            $subnet = $selectedVNet.Subnets[$i]
+                            Write-Host "    $($i + 1). $($subnet.Name) - $($subnet.AddressPrefix)" -ForegroundColor White
+                            if ($subnet.Delegations.Count -gt 0) {
+                                Write-Host "       ⚠ Delegated to: $($subnet.Delegations[0].ServiceName)" -ForegroundColor Yellow
+                            }
+                        }
+                        
+                        $subnetChoice = Read-Host "`n  Select Subnet (1-$($selectedVNet.Subnets.Count)), or 0 to create new"
+                        
+                        if ($subnetChoice -eq "0") {
+                            $SubnetName = Read-Host "  Enter new subnet name"
+                            $createNewVNet = $false
+                        }
+                        elseif ($subnetChoice -and $subnetChoice -match '^\d+$' -and [int]$subnetChoice -le $selectedVNet.Subnets.Count -and [int]$subnetChoice -gt 0) {
+                            $selectedSubnet = $selectedVNet.Subnets[[int]$subnetChoice - 1]
+                            $SubnetName = $selectedSubnet.Name
+                            $subnetResourceId = $selectedSubnet.Id
+                            
+                            if ($selectedSubnet.Delegations.Count -gt 0) {
+                                Write-Host "  ⚠ WARNING: Subnet is delegated" -ForegroundColor Yellow
+                                $continueAnyway = Read-Host "  Continue? (y/N)"
+                                if ($continueAnyway -ne 'y' -and $continueAnyway -ne 'Y') {
+                                    exit 1
+                                }
+                            }
+                            
+                            Write-Host "  ✓ Selected Subnet: $SubnetName" -ForegroundColor Green
+                            $createNewVNet = $false
+                        }
+                    }
+                } else {
+                    $createNewVNet = $true
+                }
+            }
+        }
+        "3" {
+            # Search all VNets across subscription
+            Write-Host "`nSearching all VNets in subscription (this may take a moment)..." -ForegroundColor Cyan
+            $allVNets = Get-AzVirtualNetwork
+            
+            if ($allVNets.Count -eq 0) {
+                Write-Host "No VNets found in subscription. New VNet will be created." -ForegroundColor Yellow
+                $createNewVNet = $true
+            } else {
+                Write-Host "`nFound $($allVNets.Count) VNet(s):" -ForegroundColor Cyan
+                for ($i = 0; $i -lt $allVNets.Count; $i++) {
+                    Write-Host "  $($i + 1). $($allVNets[$i].Name) - RG: $($allVNets[$i].ResourceGroupName) - $($allVNets[$i].AddressSpace.AddressPrefixes -join ', ')" -ForegroundColor White
+                }
+                
+                $vnetChoice = Read-Host "`nSelect VNet (1-$($allVNets.Count)), or 0 to create new"
+                
+                if ($vnetChoice -eq "0") {
+                    $createNewVNet = $true
+                }
+                elseif ($vnetChoice -and $vnetChoice -match '^\d+$' -and [int]$vnetChoice -le $allVNets.Count -and [int]$vnetChoice -gt 0) {
+                    $selectedVNet = $allVNets[[int]$vnetChoice - 1]
+                    $VNetName = $selectedVNet.Name
+                    $vnetResourceId = $selectedVNet.Id
+                    $vnetResourceGroup = $selectedVNet.ResourceGroupName
+                    
+                    if ($vnetResourceGroup -ne $ResourceGroupName) {
+                        Write-Host "  ℹ VNet is in different resource group: $vnetResourceGroup" -ForegroundColor Yellow
+                    }
+                    
+                    # CRITICAL: Update location to match VNet's location
+                    $vnetLocation = $selectedVNet.Location
+                    if ($Location -ne $vnetLocation) {
+                        Write-Host "  ⚠ VNet is in region: $vnetLocation" -ForegroundColor Yellow
+                        Write-Host "  Deployment location changed from $Location to $vnetLocation (resources must be in same region as VNet)" -ForegroundColor Yellow
+                        $Location = $vnetLocation
+                    }
+                    
+                    # Subnet selection (same logic as above)
+                    if ($selectedVNet.Subnets.Count -eq 0) {
+                        Write-Host "  No subnets in VNet. New subnet will be created." -ForegroundColor Yellow
+                        $SubnetName = "tts-subnet"
+                        $createNewVNet = $false
+                    } else {
+                        Write-Host "`n  Available Subnets:" -ForegroundColor Cyan
+                        for ($i = 0; $i -lt $selectedVNet.Subnets.Count; $i++) {
+                            $subnet = $selectedVNet.Subnets[$i]
+                            Write-Host "    $($i + 1). $($subnet.Name) - $($subnet.AddressPrefix)" -ForegroundColor White
+                            if ($subnet.Delegations.Count -gt 0) {
+                                Write-Host "       ⚠ Delegated to: $($subnet.Delegations[0].ServiceName)" -ForegroundColor Yellow
+                            }
+                        }
+                        
+                        $subnetChoice = Read-Host "`n  Select Subnet (1-$($selectedVNet.Subnets.Count)), or 0 to create new"
+                        
+                        if ($subnetChoice -eq "0") {
+                            $SubnetName = Read-Host "  Enter new subnet name"
+                            $createNewVNet = $false
+                        }
+                        elseif ($subnetChoice -and $subnetChoice -match '^\d+$' -and [int]$subnetChoice -le $selectedVNet.Subnets.Count -and [int]$subnetChoice -gt 0) {
+                            $selectedSubnet = $selectedVNet.Subnets[[int]$subnetChoice - 1]
+                            $SubnetName = $selectedSubnet.Name
+                            $subnetResourceId = $selectedSubnet.Id
+                            
+                            if ($selectedSubnet.Delegations.Count -gt 0) {
+                                Write-Host "  ⚠ WARNING: Subnet is delegated" -ForegroundColor Yellow
+                                $continueAnyway = Read-Host "  Continue? (y/N)"
+                                if ($continueAnyway -ne 'y' -and $continueAnyway -ne 'Y') {
+                                    exit 1
+                                }
+                            }
+                            
+                            Write-Host "  ✓ Selected Subnet: $SubnetName" -ForegroundColor Green
+                            $createNewVNet = $false
+                        }
+                    }
+                }
+            }
+        }
+        default {
+            # Create new (option 4 or Enter)
+            $createNewVNet = $true
         }
     }
 }
 
 if ($createNewVNet) {
     Write-Host "✓ New VNet and Subnet will be created automatically by Bicep template" -ForegroundColor Green
+    Write-Host "✓ Database subnet with PostgreSQL delegation will be created" -ForegroundColor Green
+} else {
+    # ========================================================================
+    # SELECT DATABASE SUBNET FOR POSTGRESQL (MUST BE DELEGATED)
+    # ========================================================================
+    
+    Write-Host "`n  📊 Database Subnet Selection (PostgreSQL Private Access)" -ForegroundColor Cyan
+    Write-Host "  ⚠️  PostgreSQL Flexible Server requires a delegated subnet" -ForegroundColor Yellow
+    Write-Host "  Delegation: Microsoft.DBforPostgreSQL/flexibleServers`n" -ForegroundColor Gray
+    
+    # Get fresh VNet info to see all subnets
+    $selectedVNet = Get-AzVirtualNetwork -Name $VNetName -ResourceGroupName $vnetResourceGroup
+    
+    # Find subnets with PostgreSQL delegation
+    $delegatedSubnets = $selectedVNet.Subnets | Where-Object {
+        $_.Delegations.Count -gt 0 -and 
+        $_.Delegations[0].ServiceName -eq 'Microsoft.DBforPostgreSQL/flexibleServers'
+    }
+    
+    if ($delegatedSubnets.Count -gt 0) {
+        Write-Host "  Found $($delegatedSubnets.Count) subnet(s) with PostgreSQL delegation:" -ForegroundColor Green
+        for ($i = 0; $i -lt $delegatedSubnets.Count; $i++) {
+            $dbSubnet = $delegatedSubnets[$i]
+            Write-Host "    $($i + 1). $($dbSubnet.Name) - $($dbSubnet.AddressPrefix)" -ForegroundColor White
+            Write-Host "       ✓ Delegated to: Microsoft.DBforPostgreSQL/flexibleServers" -ForegroundColor Green
+        }
+        
+        if ($delegatedSubnets.Count -eq 1) {
+            $DatabaseSubnetName = $delegatedSubnets[0].Name
+            Write-Host "`n  ✓ Auto-selected: $DatabaseSubnetName" -ForegroundColor Green
+        } else {
+            $dbSubnetChoice = Read-Host "`n  Select Database Subnet (1-$($delegatedSubnets.Count))"
+            if ($dbSubnetChoice -and $dbSubnetChoice -match '^\d+$' -and [int]$dbSubnetChoice -le $delegatedSubnets.Count -and [int]$dbSubnetChoice -gt 0) {
+                $DatabaseSubnetName = $delegatedSubnets[[int]$dbSubnetChoice - 1].Name
+                Write-Host "  ✓ Selected: $DatabaseSubnetName" -ForegroundColor Green
+            } else {
+                Write-Error "Invalid selection"
+                exit 1
+            }
+        }
+    } else {
+        Write-Host "  ⚠️  No subnets found with PostgreSQL delegation!" -ForegroundColor Red
+        Write-Host "`n  Available options:" -ForegroundColor Cyan
+        Write-Host "    1. Delegate an existing subnet" -ForegroundColor White
+        Write-Host "    2. Switch to public database access (not recommended for production)" -ForegroundColor White
+        
+        $delegationChoice = Read-Host "`n  Select option (1-2)"
+        
+        if ($delegationChoice -eq "1") {
+            # Show non-delegated subnets
+            $availableSubnets = $selectedVNet.Subnets | Where-Object {
+                $_.Delegations.Count -eq 0 -and $_.Name -ne $SubnetName
+            }
+            
+            if ($availableSubnets.Count -eq 0) {
+                Write-Host "`n  No available subnets to delegate. Creating new subnet for database..." -ForegroundColor Yellow
+                $DatabaseSubnetName = "database-subnet"
+                Write-Host "  ⚠️  You'll need to manually create subnet '$DatabaseSubnetName' with PostgreSQL delegation" -ForegroundColor Yellow
+                Write-Host "  Or deployment will fail. Continue? (y/N)" -ForegroundColor Red
+                $continue = Read-Host
+                if ($continue -ne 'y' -and $continue -ne 'Y') {
+                    exit 1
+                }
+            } else {
+                Write-Host "`n  Available subnets (not delegated):" -ForegroundColor Cyan
+                for ($i = 0; $i -lt $availableSubnets.Count; $i++) {
+                    Write-Host "    $($i + 1). $($availableSubnets[$i].Name) - $($availableSubnets[$i].AddressPrefix)" -ForegroundColor White
+                }
+                
+                $subnetToDelegate = Read-Host "`n  Select subnet to delegate to PostgreSQL (1-$($availableSubnets.Count))"
+                
+                if ($subnetToDelegate -and $subnetToDelegate -match '^\d+$' -and [int]$subnetToDelegate -le $availableSubnets.Count -and [int]$subnetToDelegate -gt 0) {
+                    $targetSubnet = $availableSubnets[[int]$subnetToDelegate - 1]
+                    $DatabaseSubnetName = $targetSubnet.Name
+                    
+                    Write-Host "`n  Checking for resource locks on VNet..." -ForegroundColor Cyan
+                    
+                    # Check for locks on the VNet
+                    $vnetLocks = Get-AzResourceLock -ResourceGroupName $vnetResourceGroup -ResourceName $VNetName -ResourceType "Microsoft.Network/virtualNetworks" -ErrorAction SilentlyContinue
+                    
+                    if ($vnetLocks) {
+                        Write-Host "  ⚠️  WARNING: VNet has resource lock(s):" -ForegroundColor Red
+                        foreach ($lock in $vnetLocks) {
+                            Write-Host "    - $($lock.Name) ($($lock.Properties.level))" -ForegroundColor Yellow
+                        }
+                        
+                        Write-Host "`n  Subnet delegation requires modifying the VNet, which is blocked by the lock." -ForegroundColor Yellow
+                        Write-Host "  Options:" -ForegroundColor Cyan
+                        Write-Host "    1. Temporarily remove lock, add delegation, then re-apply lock" -ForegroundColor White
+                        Write-Host "    2. Skip delegation (you must add it manually before deployment)" -ForegroundColor White
+                        Write-Host "    3. Switch to public database access" -ForegroundColor White
+                        
+                        $lockChoice = Read-Host "`n  Select option (1-3)"
+                        
+                        if ($lockChoice -eq "1") {
+                            # Remove locks temporarily
+                            Write-Host "`n  Removing locks temporarily..." -ForegroundColor Cyan
+                            $removedLocks = @()
+                            foreach ($lock in $vnetLocks) {
+                                Remove-AzResourceLock -LockId $lock.LockId -Force | Out-Null
+                                $removedLocks += $lock
+                                Write-Host "    ✓ Removed: $($lock.Name)" -ForegroundColor Green
+                            }
+                            
+                            # Add delegation
+                            Write-Host "`n  Configuring delegation on subnet: $DatabaseSubnetName..." -ForegroundColor Cyan
+                            
+                            $targetSubnet.Delegations.Add(
+                                (New-Object Microsoft.Azure.Commands.Network.Models.PSDelegation -Property @{
+                                    Name = "PostgreSQLFlexibleServer"
+                                    ServiceName = "Microsoft.DBforPostgreSQL/flexibleServers"
+                                })
+                            )
+                            
+                            try {
+                                Set-AzVirtualNetwork -VirtualNetwork $selectedVNet | Out-Null
+                                Write-Host "  ✓ Delegation configured successfully!" -ForegroundColor Green
+                            } catch {
+                                Write-Error "Failed to configure delegation: $_"
+                                
+                                # Re-apply locks before exiting
+                                Write-Host "`n  Re-applying locks..." -ForegroundColor Cyan
+                                foreach ($lock in $removedLocks) {
+                                    New-AzResourceLock -LockName $lock.Name -LockLevel $lock.Properties.level -ResourceGroupName $vnetResourceGroup -ResourceName $VNetName -ResourceType "Microsoft.Network/virtualNetworks" -LockNotes $lock.Properties.notes -Force | Out-Null
+                                }
+                                
+                                exit 1
+                            }
+                            
+                            # Re-apply locks
+                            Write-Host "`n  Re-applying locks..." -ForegroundColor Cyan
+                            foreach ($lock in $removedLocks) {
+                                New-AzResourceLock -LockName $lock.Name -LockLevel $lock.Properties.level -ResourceGroupName $vnetResourceGroup -ResourceName $VNetName -ResourceType "Microsoft.Network/virtualNetworks" -LockNotes $lock.Properties.notes -Force | Out-Null
+                                Write-Host "    ✓ Re-applied: $($lock.Name)" -ForegroundColor Green
+                            }
+                        } elseif ($lockChoice -eq "2") {
+                            Write-Host "`n  ⚠️  IMPORTANT: You MUST manually add PostgreSQL delegation to subnet '$DatabaseSubnetName'" -ForegroundColor Red
+                            Write-Host "  Before running this deployment, execute:" -ForegroundColor Yellow
+                            Write-Host "    `$vnet = Get-AzVirtualNetwork -Name '$VNetName' -ResourceGroupName '$vnetResourceGroup'" -ForegroundColor Cyan
+                            Write-Host "    `$subnet = Get-AzVirtualNetworkSubnetConfig -VirtualNetwork `$vnet -Name '$DatabaseSubnetName'" -ForegroundColor Cyan
+                            Write-Host "    `$subnet.Delegations.Add((New-Object Microsoft.Azure.Commands.Network.Models.PSDelegation -Property @{Name='PostgreSQL';ServiceName='Microsoft.DBforPostgreSQL/flexibleServers'}))" -ForegroundColor Cyan
+                            Write-Host "    Set-AzVirtualNetwork -VirtualNetwork `$vnet" -ForegroundColor Cyan
+                            Write-Host "`n  Continue with deployment assuming delegation will be added? (y/N)" -ForegroundColor Yellow
+                            $continue = Read-Host
+                            if ($continue -ne 'y' -and $continue -ne 'Y') {
+                                exit 1
+                            }
+                        } elseif ($lockChoice -eq "3") {
+                            Write-Host "`n  ⚠️  Switching to PUBLIC database access" -ForegroundColor Yellow
+                            Write-Host "  Database will be accessible via public endpoint with firewall rules" -ForegroundColor Yellow
+                            $enablePrivateDatabaseAccess = $false
+                            $DatabaseSubnetName = "" # Not needed for public access
+                        } else {
+                            Write-Error "Invalid selection"
+                            exit 1
+                        }
+                    } else {
+                        # No locks - proceed with delegation
+                        Write-Host "  ✓ No locks found" -ForegroundColor Green
+                        Write-Host "`n  Configuring delegation on subnet: $DatabaseSubnetName..." -ForegroundColor Cyan
+                        
+                        $targetSubnet.Delegations.Add(
+                            (New-Object Microsoft.Azure.Commands.Network.Models.PSDelegation -Property @{
+                                Name = "PostgreSQLFlexibleServer"
+                                ServiceName = "Microsoft.DBforPostgreSQL/flexibleServers"
+                            })
+                        )
+                        
+                        try {
+                            Set-AzVirtualNetwork -VirtualNetwork $selectedVNet | Out-Null
+                            Write-Host "  ✓ Delegation configured successfully!" -ForegroundColor Green
+                        } catch {
+                            Write-Error "Failed to configure delegation: $_"
+                            exit 1
+                        }
+                    }
+                } else {
+                    Write-Error "Invalid selection"
+                    exit 1
+                }
+            }
+        } elseif ($delegationChoice -eq "2") {
+            Write-Host "`n  ⚠️  Switching to PUBLIC database access" -ForegroundColor Yellow
+            Write-Host "  Database will be accessible via public endpoint with firewall rules" -ForegroundColor Yellow
+            $enablePrivateDatabaseAccess = $false
+            $DatabaseSubnetName = "" # Not needed for public access
+        } else {
+            Write-Error "Invalid selection"
+            exit 1
+        }
+    }
+    
+    Write-Host "`nNetwork Configuration Summary:" -ForegroundColor Cyan
+    Write-Host "  VNet: $VNetName" -ForegroundColor White
+    Write-Host "  VNet Resource Group: $vnetResourceGroup" -ForegroundColor White
+    Write-Host "  VM Subnet: $SubnetName" -ForegroundColor White
+    if ($selectedSubnet) {
+        Write-Host "    Address: $($selectedSubnet.AddressPrefix)" -ForegroundColor Gray
+    }
+    if ($DatabaseSubnetName) {
+        Write-Host "  Database Subnet: $DatabaseSubnetName" -ForegroundColor White
+        Write-Host "    Delegation: Microsoft.DBforPostgreSQL/flexibleServers" -ForegroundColor Green
+    } else {
+        Write-Host "  Database Access: Public (with firewall rules)" -ForegroundColor Yellow
+    }
+    
+    # ========================================================================
+    # DNS Configuration for Private Database Access
+    # ========================================================================
+    
+    if ($DatabaseSubnetName) {
+        Write-Host "`nDNS Configuration for VM:" -ForegroundColor Yellow
+        Write-Host "  Private DNS zones (privatelink.postgres.database.azure.com) require Azure DNS" -ForegroundColor Gray
+        Write-Host "  If your VNet has custom DNS servers, the VM must use Azure DNS to resolve private endpoints" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  DNS Options:" -ForegroundColor Cyan
+        Write-Host "    1. Use Azure DNS (168.63.129.16) - RECOMMENDED" -ForegroundColor White
+        Write-Host "       ✓ Required for private database access" -ForegroundColor Green
+        Write-Host "       ✓ VM can still access corporate resources via Azure DNS forwarding" -ForegroundColor Green
+        Write-Host "    2. Inherit from VNet - Use VNet's configured DNS servers" -ForegroundColor White
+        Write-Host "       ⚠ Only works if VNet DNS forwards privatelink queries to Azure DNS" -ForegroundColor Yellow
+        Write-Host ""
+        
+        $dnsChoice = Read-Host "  Select DNS configuration (1-2, default: 1)"
+        
+        if ($dnsChoice -eq "2") {
+            Write-Host "  ⚠ WARNING: VM will inherit VNet DNS servers" -ForegroundColor Yellow
+            Write-Host "  If VNet DNS cannot resolve privatelink domains, deployment will fail!" -ForegroundColor Red
+            $confirm = Read-Host "  Continue with VNet DNS? (y/N)"
+            if ($confirm -eq 'y' -or $confirm -eq 'Y') {
+                $useAzureDNS = $false
+                Write-Host "  ✓ VM will use VNet DNS servers" -ForegroundColor Yellow
+            } else {
+                $useAzureDNS = $true
+                Write-Host "  ✓ VM will use Azure DNS (168.63.129.16)" -ForegroundColor Green
+            }
+        } else {
+            $useAzureDNS = $true
+            Write-Host "  ✓ VM will use Azure DNS (168.63.129.16)" -ForegroundColor Green
+        }
+    } else {
+        # Public database access doesn't require Azure DNS
+        $useAzureDNS = $false
+    }
 }
 
 # ============================================================================
@@ -342,16 +838,24 @@ try {
     
     Write-Host "  Current User ID: $currentUserId" -ForegroundColor Gray
     
-    # Create Key Vault (RBAC is enabled by default)
+    # Create Key Vault with purge protection and soft delete enabled (SFI compliance)
+    # Soft delete is automatically enabled (mandatory since Azure API 2020+)
+    # Purge protection prevents permanent deletion during the retention period
+    # PublicNetworkAccess must be explicitly set for SFI compliance policy
+    Write-Host "  Enabling soft delete (90 days), purge protection, and public network access (SFI compliance)..." -ForegroundColor Cyan
     New-AzKeyVault `
         -Name $keyVaultName `
         -ResourceGroupName $ResourceGroupName `
         -Location $Location `
         -EnabledForTemplateDeployment `
         -EnabledForDeployment `
-        -SoftDeleteRetentionInDays 7 | Out-Null
+        -EnablePurgeProtection `
+        -SoftDeleteRetentionInDays 90 `
+        -PublicNetworkAccess "Enabled" | Out-Null
     
-    Write-Host "✓ Key Vault created with RBAC" -ForegroundColor Green
+    Write-Host "✓ Key Vault created with RBAC, soft delete, and purge protection" -ForegroundColor Green
+    Write-Host "  Soft Delete: Enabled (90 days retention)" -ForegroundColor Gray
+    Write-Host "  Purge Protection: Enabled (prevents permanent deletion)" -ForegroundColor Gray
     
     # Assign Key Vault Secrets Officer role to current user
     Write-Host "Assigning Key Vault Secrets Officer role..." -ForegroundColor Cyan
@@ -366,6 +870,26 @@ try {
     Write-Host "✓ RBAC role assigned" -ForegroundColor Green
     Write-Host "Waiting for RBAC propagation (30 seconds)..." -ForegroundColor Yellow
     Start-Sleep -Seconds 30
+    
+    # Add delete lock on Key Vault to prevent accidental deletion
+    Write-Host "Adding delete lock to Key Vault..." -ForegroundColor Cyan
+    try {
+        New-AzResourceLock `
+            -LockName "DoNotDelete-KeyVault" `
+            -LockLevel CanNotDelete `
+            -ResourceName $keyVaultName `
+            -ResourceType "Microsoft.KeyVault/vaults" `
+            -ResourceGroupName $ResourceGroupName `
+            -LockNotes "Prevents accidental deletion of Key Vault containing TTS secrets" `
+            -Force | Out-Null
+        Write-Host "✓ Delete lock applied to Key Vault" -ForegroundColor Green
+        Write-Host "  To delete Key Vault, you must first remove the lock:" -ForegroundColor Yellow
+        Write-Host "  Remove-AzResourceLock -LockName 'DoNotDelete-KeyVault' -ResourceGroupName '$ResourceGroupName'" -ForegroundColor Gray
+    }
+    catch {
+        Write-Warning "Could not create delete lock on Key Vault: $_"
+        Write-Host "  Key Vault is still protected by RBAC, but no delete lock applied" -ForegroundColor Yellow
+    }
 }
 catch {
     Write-Error "Failed to create Key Vault: $_"
@@ -455,16 +979,39 @@ $deploymentParams = @{
     cookieHashKey         = $cookieHashKey
     cookieBlockKey        = $cookieBlockKey
     oauthClientSecret     = (ConvertTo-SecureString -String $oauthClientSecret -AsPlainText -Force)
-    enableKeyVault        = $true
-    enablePrivateDatabaseAccess = $true
+    enableKeyVault        = $true  # PowerShell creates the vault, Bicep references it and creates secrets
+    enablePrivateDatabaseAccess = if ($createNewVNet) { $true } else { if ($DatabaseSubnetName) { $true } else { $false } }
+    useAzureDNS           = if (Get-Variable -Name useAzureDNS -ErrorAction SilentlyContinue) { $useAzureDNS } else { $true }
+    enableMonitoring      = $false  # Disabled to avoid policy restrictions on Log Analytics
     Verbose               = $true
 }
 
 # Add VNet/Subnet parameters if using existing network
-if (-not $createNewVNet -and $vnetResourceId -and $subnetResourceId) {
-    $deploymentParams.useExistingVNet = $true
-    $deploymentParams.existingVNetId = $vnetResourceId
-    $deploymentParams.existingSubnetId = $subnetResourceId
+if (-not $createNewVNet) {
+    if ($subnetResourceId) {
+        # Existing subnet selected
+        $deploymentParams.useExistingVNet = $true
+        $deploymentParams.existingVNetName = $VNetName
+        $deploymentParams.existingVNetResourceGroup = $vnetResourceGroup
+        $deploymentParams.existingSubnetName = $SubnetName
+        
+        # Add database subnet if provided
+        if ($DatabaseSubnetName) {
+            $deploymentParams.existingDatabaseSubnetName = $DatabaseSubnetName
+        }
+    } else {
+        # Create new subnet in existing VNet
+        $deploymentParams.useExistingVNet = $true
+        $deploymentParams.existingVNetName = $VNetName
+        $deploymentParams.existingVNetResourceGroup = $vnetResourceGroup
+        $deploymentParams.createSubnetInExistingVNet = $true
+        $deploymentParams.newSubnetName = $SubnetName
+        
+        # Add database subnet if provided
+        if ($DatabaseSubnetName) {
+            $deploymentParams.existingDatabaseSubnetName = $DatabaseSubnetName
+        }
+    }
 }
 
 # Add ACR parameters if using custom registry
@@ -475,6 +1022,10 @@ if ($UseCustomAcr -and -not [string]::IsNullOrEmpty($AcrName)) {
 
 if (-not [string]::IsNullOrEmpty($DomainName)) {
     $deploymentParams.domainName = $DomainName
+}
+
+if (-not [string]::IsNullOrEmpty($DnsNamePrefix)) {
+    $deploymentParams.dnsNamePrefix = $DnsNamePrefix
 }
 
 Write-Host "Starting template deployment..." -ForegroundColor Cyan
@@ -495,7 +1046,9 @@ if ($DomainName) {
 Write-Host "`nThis will take 15-20 minutes...`n" -ForegroundColor Yellow
 
 try {
-    $deployment = New-AzResourceGroupDeployment @deploymentParams
+    # Enable detailed error output
+    $ErrorActionPreference = "Stop"
+    $deployment = New-AzResourceGroupDeployment @deploymentParams -ErrorVariable deployError
     
     Write-Host "`n╔══════════════════════════════════════════════════════════╗" -ForegroundColor Green
     Write-Host "║              Deployment Complete!                        ║" -ForegroundColor Green
@@ -533,6 +1086,32 @@ try {
 catch {
     Write-Host "`n✗ Deployment failed!" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    
+    # Show detailed error information
+    Write-Host "`n=== FULL ERROR DETAILS ===" -ForegroundColor Yellow
+    Write-Host ($_ | Format-List * -Force | Out-String) -ForegroundColor Red
+    
+    if ($_.ErrorDetails) {
+        Write-Host "`n=== ERROR DETAILS JSON ===" -ForegroundColor Yellow
+        Write-Host $_.ErrorDetails.Message -ForegroundColor Red
+    }
+    
+    # Show exception details
+    if ($_.Exception) {
+        Write-Host "`n=== EXCEPTION DETAILS ===" -ForegroundColor Yellow
+        $exception = $_.Exception
+        while ($exception) {
+            Write-Host "Type: $($exception.GetType().FullName)" -ForegroundColor Red
+            Write-Host "Message: $($exception.Message)" -ForegroundColor Red
+            if ($exception.InnerException) {
+                Write-Host "`n--- Inner Exception ---" -ForegroundColor Yellow
+                $exception = $exception.InnerException
+            } else {
+                $exception = $null
+            }
+        }
+    }
+    
     exit 1
 }
 

@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600">
+  <defs>
+    <style>
+      .box { fill: #0078D4; stroke: #004578; stroke-width: 2; }
+      .box-secondary { fill: #00B4E6; stroke: #007BA7; stroke-width: 2; }
+      .box-tertiary { fill: #50E6FF; stroke: #00B4E6; stroke-width: 2; }
+      .text { fill: white; font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; font-weight: 600; }
+      .text-small { fill: white; font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; }
+      .arrow { stroke: #333; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .label { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; font-style: italic; }
+      .title { fill: #333; font-family: 'Segoe UI', Arial, sans-serif; font-size: 20px; font-weight: 700; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="500" y="35" class="title" text-anchor="middle">The Things Stack Deployment Hierarchy</text>
+  
+  <!-- deploy.ps1 (Primary Orchestrator) -->
+  <rect x="350" y="70" width="300" height="60" rx="5" class="box"/>
+  <text x="500" y="95" class="text" text-anchor="middle">deploy.ps1</text>
+  <text x="500" y="115" class="text-small" text-anchor="middle">Primary Orchestrator - Single Entry Point</text>
+  
+  <!-- Mode branches -->
+  <path d="M 500 130 L 500 170" class="arrow"/>
+  
+  <!-- Mode selector -->
+  <rect x="425" y="170" width="150" height="35" rx="3" fill="#F3F3F3" stroke="#999" stroke-width="1"/>
+  <text x="500" y="192" fill="#333" font-size="13" text-anchor="middle" font-weight="600">Choose Mode</text>
+  
+  <!-- Arrows to three modes -->
+  <path d="M 450 205 L 200 250" class="arrow"/>
+  <path d="M 500 205 L 500 250" class="arrow"/>
+  <path d="M 550 205 L 800 250" class="arrow"/>
+  
+  <!-- Mode labels -->
+  <text x="300" y="235" class="label">Mode: quick</text>
+  <text x="480" y="235" class="label">Mode: aks</text>
+  <text x="660" y="235" class="label">Mode: vm</text>
+  
+  <!-- Quick Mode Branch -->
+  <rect x="50" y="250" width="300" height="60" rx="5" class="box-secondary"/>
+  <text x="200" y="275" class="text" text-anchor="middle">deploy-simple.ps1</text>
+  <text x="200" y="295" class="text-small" text-anchor="middle">Quick VM Deployment</text>
+  
+  <path d="M 200 310 L 200 370" class="arrow"/>
+  
+  <rect x="50" y="370" width="300" height="60" rx="5" class="box-tertiary"/>
+  <text x="200" y="395" class="text" text-anchor="middle">tts-docker-deployment.bicep</text>
+  <text x="200" y="415" class="text-small" text-anchor="middle">VM + Docker + PostgreSQL</text>
+  
+  <!-- AKS Mode Branch -->
+  <rect x="400" y="250" width="200" height="60" rx="5" class="box-secondary"/>
+  <text x="500" y="275" class="text" text-anchor="middle">deploy-aks.ps1</text>
+  <text x="500" y="295" class="text-small" text-anchor="middle">Kubernetes Deploy</text>
+  
+  <path d="M 500 310 L 500 370" class="arrow"/>
+  
+  <rect x="375" y="370" width="250" height="60" rx="5" class="box-tertiary"/>
+  <text x="500" y="395" class="text" text-anchor="middle">tts-aks-deployment.bicep</text>
+  <text x="500" y="415" class="text-small" text-anchor="middle">AKS + PostgreSQL + Redis</text>
+  
+  <!-- VM Mode Branch -->
+  <rect x="650" y="250" width="300" height="60" rx="5" class="box-secondary"/>
+  <text x="800" y="275" class="text" text-anchor="middle">Advanced VM Deployment</text>
+  <text x="800" y="295" class="text-small" text-anchor="middle">Inline Configuration</text>
+  
+  <path d="M 800 310 L 800 370" class="arrow"/>
+  
+  <rect x="650" y="370" width="300" height="60" rx="5" class="box-tertiary"/>
+  <text x="800" y="395" class="text" text-anchor="middle">tts-docker-deployment.bicep</text>
+  <text x="800" y="415" class="text-small" text-anchor="middle">Custom Parameters</text>
+  
+  <!-- Legend -->
+  <rect x="50" y="500" width="900" height="80" rx="5" fill="#F9F9F9" stroke="#CCC" stroke-width="1"/>
+  <text x="60" y="520" fill="#333" font-size="14" font-weight="600">Legend</text>
+  
+  <rect x="60" y="535" width="15" height="15" class="box"/>
+  <text x="80" y="547" fill="#333" font-size="12">Primary Orchestrator</text>
+  
+  <rect x="240" y="535" width="15" height="15" class="box-secondary"/>
+  <text x="260" y="547" fill="#333" font-size="12">PowerShell Scripts</text>
+  
+  <rect x="420" y="535" width="15" height="15" class="box-tertiary"/>
+  <text x="440" y="547" fill="#333" font-size="12">Bicep Templates</text>
+  
+  <line x1="620" y1="542" x2="660" y2="542" class="arrow"/>
+  <text x="665" y="547" fill="#333" font-size="12">Execution Flow</text>
+  
+  <text x="60" y="570" fill="#666" font-size="11" font-style="italic">⚠️ Always use deploy.ps1 as entry point - never call sub-scripts directly</text>
+</svg>
