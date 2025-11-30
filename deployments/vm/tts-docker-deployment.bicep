@@ -342,6 +342,9 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-04-01' = {
 resource dbServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview' = {
   name: dbServerName
   location: location
+  dependsOn: [
+    privateDnsZoneLink
+  ]
   // Implicit dependency through privateDnsZone.id reference (line 328)
   sku: {
     name: 'Standard_B1ms'
