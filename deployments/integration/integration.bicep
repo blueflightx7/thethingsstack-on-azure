@@ -1,7 +1,58 @@
+// ==============================================================================
+// IoT Hub & Data Intelligence Integration - Bicep Template
+// ==============================================================================
+// 
+// PURPOSE:
+// This template deploys the infrastructure for bridging The Things Stack (TTS)
+// telemetry data to Azure's data intelligence platform. It creates a webhook-based
+// integration for non-Enterprise TTS deployments that cannot use native integrations.
+//
+// ARCHITECTURE:
+// TTS Webhook → Azure Function → IoT Hub → [Event Hub | Blob Storage]
+//                                            ↓              ↓
+//                                      Azure Fabric    Archive
+//                                                          ↓
+//                                                     SQL Database
+//
+// COMPONENTS DEPLOYED:
+// - Azure IoT Hub (Basic B1) - Message ingestion and routing
+// - Azure Functions (Consumption) - Webhook bridge with stateless HttpClient
+// - Event Hub (Basic) - Real-time streaming to Azure Fabric
+// - Blob Storage (Data Lake Gen2) - Raw telemetry archive with lifecycle management
+// - SQL Database (Serverless) - Structured telemetry storage with auto-pause
+// - Application Insights & Log Analytics - Monitoring (conditional)
+//
+// BROWNFIELD AWARENESS:
+// This template supports deploying into existing Resource Groups with monitoring
+// resources. Use enableMonitoring and createMonitoringResources flags to control
+// whether to create new monitoring resources or reuse existing ones.
+//
+// SECURITY:
+// - TLS 1.2 enforced on all resources (Azure Policy compliance)
+// - HTTPS-only traffic for Storage Accounts
+// - Secrets stored in existing Key Vault
+// - SAS token-based authentication for IoT Hub REST API
+// - Managed Identity for Function → Key Vault access
+//
+// COST ESTIMATE: ~$30-45/month
+// - IoT Hub B1: ~$10/month (400K messages/day)
+// - Event Hub Basic: ~$11/month
+// - SQL Serverless: ~$5-15/month (auto-pause after 1 hour)
+// - Storage: ~$1-4/month
+// - Functions: ~$0-5/month (Consumption plan)
+// - Monitoring: ~$3-10/month (if created)
+//
+// DEPLOYMENT DEPENDENCIES:
+// - Existing Resource Group
+// - Existing Key Vault with RBAC permissions
+// - Azure IoT CLI extension (for device identity creation)
+//
+// ==============================================================================
+
 @description('The Azure region for the resources')
 param location string = resourceGroup().location
 
-@description('Prefix for resource names')
+@description('Prefix for resource names (Note: hyphens removed for storage account names)')
 param prefix string = 'tts-int'
 
 @description('The name of the existing Key Vault to store secrets in')

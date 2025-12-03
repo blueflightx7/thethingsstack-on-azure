@@ -2,6 +2,49 @@
 # ==============================================================================
 # Deploy IoT Hub & Data Intelligence Integration
 # ==============================================================================
+#
+# PURPOSE:
+# Orchestrates deployment of Azure IoT Hub data intelligence infrastructure for
+# The Things Stack (TTS) telemetry bridging. This script handles brownfield
+# scenarios by detecting existing monitoring resources and prompting for reuse.
+#
+# ARCHITECTURE:
+# 1. Generate SQL admin password (complexity requirements)
+# 2. Detect existing Log Analytics and Application Insights resources
+# 3. Prompt user: Reuse, Create New, or Skip monitoring
+# 4. Deploy Bicep template with conditional monitoring flags
+# 5. Create IoT Hub bridge device identity using Azure IoT CLI
+# 6. Configure Function App with device connection string
+# 7. Deploy Function code via ZIP deployment
+# 8. Initialize SQL database schema using Entra ID authentication
+# 9. Generate TTS webhook configuration helper script
+#
+# BROWNFIELD LOGIC:
+# - Reuse: Pass existing resource IDs to Bicep, skip creation
+# - Create New: Deploy new monitoring stack (separate billing/access)
+# - Skip: No monitoring (enableMonitoring=false, not recommended for prod)
+#
+# PARAMETERS:
+# - ResourceGroupName: Must exist, detected region used for all resources
+# - Location: Auto-detected from Resource Group in deploy.ps1
+# - KeyVaultName: Must exist with RBAC permissions for deployment user
+#
+# PREREQUISITES:
+# - Azure PowerShell module (Az)
+# - Azure CLI with IoT extension (az extension add --name azure-iot)
+# - PowerShell 7+ recommended
+# - Key Vault Secrets Officer role on target Key Vault
+#
+# OUTPUTS:
+# - Webhook URL for TTS configuration
+# - Event Hub connection string for Azure Fabric
+# - SQL server name and database name
+# - IoT Hub name
+# - Generated configure-tts-webhook.sh script
+#
+# DEPLOYMENT TIME: 5-10 minutes
+#
+# ==============================================================================
 
 param(
     [Parameter(Mandatory=$true)]
@@ -34,7 +77,26 @@ $sqlPassword += "Aa1!"
 Write-Host "Deploying infrastructure (IoT Hub, SQL, Event Hub, Functions)..." -ForegroundColor Yellow
 Write-Host "This may take 5-10 minutes." -ForegroundColor Gray
 
-# Check for existing monitoring resources
+# ==============================================================================
+# BROWNFIELD AWARENESS: Detect Existing Monitoring Resources
+# ==============================================================================
+# In brownfield scenarios, the target Resource Group may already contain Log
+# Analytics Workspace and/or Application Insights from the main TTS deployment.
+# We detect these and offer three options:
+#
+# 1. REUSE: Configure Function App to use existing resources (cost-efficient)
+#    - Pass existing resource IDs to Bicep
+#    - Set createMonitoringResources=false, enableMonitoring=true
+#
+# 2. CREATE NEW: Deploy separate monitoring stack (billing/access isolation)
+#    - Ignore existing resources
+#    - Set createMonitoringResources=true, enableMonitoring=true
+#
+# 3. SKIP: No monitoring for integration (not recommended for production)
+#    - Set createMonitoringResources=false, enableMonitoring=false
+#    - Function App will not send telemetry to Application Insights
+# ==============================================================================
+
 Write-Host "Checking for existing monitoring resources..." -ForegroundColor Gray
 $existingLaw = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType "Microsoft.OperationalInsights/workspaces" -ErrorAction SilentlyContinue | Select-Object -First 1
 $existingAi = Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType "Microsoft.Insights/components" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -45,6 +107,7 @@ $params = @{
     sqlAdminPassword = $sqlPassword
 }
 
+# Default: Create monitoring resources
 $enableMonitoring = $true
 $createMonitoringResources = $true
 
