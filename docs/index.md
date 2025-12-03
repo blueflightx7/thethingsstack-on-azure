@@ -22,7 +22,9 @@
 - **[Quick Start Deployment](deploy/quick-start.md)** - Get running in 10 minutes
 - **[VM Deployment Guide](deploy/vm-deployment.md)** - Development/test environments
 - **[AKS Deployment Guide](deploy/aks-deployment.md)** - Production Kubernetes deployments
-- **[Brownfield Deployments](deploy/brownfield-guide.md)** - Deploy into existing VNets and infrastructure
+- [**Deployment Orchestration**](deploy/orchestration.md) - How the `deploy.ps1` system works.
+- [**IoT Hub & Data Intelligence**](deploy/integration-deployment.md) - Deploy the Azure data integration stack.
+- [**Brownfield Guide**](deploy/brownfield-guide.md) - Deploying into existing Azure environments.
 - **[DNS Configuration](deploy/dns-configuration.md)** - Custom domains, Azure DNS, and Let's Encrypt
 - **[Parameter Reference](deploy/parameters.md)** - Complete deployment parameter documentation
 - **[CI/CD Setup](deploy/cicd-setup.md)** - GitHub Actions and Azure DevOps pipelines
