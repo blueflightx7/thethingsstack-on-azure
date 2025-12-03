@@ -6,7 +6,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet("", "vm", "aks", "quick", "monitoring")]
+    [ValidateSet("", "vm", "aks", "quick", "monitoring", "integration")]
     [string]$Mode = "",
     
     [Parameter(Mandatory=$false)]
@@ -73,6 +73,11 @@ function Show-DeploymentMenu {
     Write-Host "  [5] Compare All Deployment Options" -ForegroundColor Magenta
     Write-Host "      • View detailed comparison matrix`n" -ForegroundColor Gray
     
+    Write-Host "  [6] Add IoT Hub & Data Intelligence" -ForegroundColor Blue
+    Write-Host "      • Adds IoT Hub, SQL, Fabric Stream, & Archival" -ForegroundColor Gray
+    Write-Host "      • Non-Enterprise compatible (Webhooks)" -ForegroundColor Gray
+    Write-Host "      • Cost: +~$30-45/month`n" -ForegroundColor Gray
+
     Write-Host "  [Q] Quit`n" -ForegroundColor DarkGray
     
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
@@ -172,6 +177,10 @@ if ([string]::IsNullOrEmpty($Mode)) {
             }
             "5" { 
                 Show-ComparisonMatrix
+            }
+            "6" { 
+                $Mode = "integration"
+                break
             }
             "Q" {
                 Write-Host "`nDeployment cancelled." -ForegroundColor Yellow
@@ -569,9 +578,60 @@ SSH Source IP: $AdminSourceIP
         & $monitoringScript @params
     }
     
+    "integration" {
+        Write-Host "🔌 Starting IoT Hub & Data Intelligence Integration..." -ForegroundColor Magenta
+        Write-Host "   Using: deployments/integration/deploy-integration.ps1`n" -ForegroundColor Gray
+        
+        $integrationScript = "$PSScriptRoot\deployments\integration\deploy-integration.ps1"
+        if (-not (Test-Path $integrationScript)) {
+            Write-Host "❌ Error: Integration deployment script not found" -ForegroundColor Red
+            Write-Host "   Expected: $integrationScript`n" -ForegroundColor Red
+            exit 1
+        }
+
+        # Collect required parameters
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+        Write-Host "  INTEGRATION CONFIGURATION" -ForegroundColor Yellow
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
+
+        Write-Host "Enter the Resource Group name of your existing TTS deployment:" -ForegroundColor Cyan
+        $targetRg = Read-Host "Resource Group Name"
+        if ([string]::IsNullOrWhiteSpace($targetRg)) {
+            Write-Host "Resource Group Name is required." -ForegroundColor Red
+            exit 1
+        }
+
+        # Auto-detect region from Resource Group
+        Write-Host "Detecting Resource Group region..." -ForegroundColor Gray
+        try {
+            $rgInfo = Get-AzResourceGroup -Name $targetRg -ErrorAction Stop
+            $targetLocation = $rgInfo.Location
+            Write-Host "✓ Using region: $targetLocation" -ForegroundColor Green
+        } catch {
+            Write-Host "❌ Error: Could not find Resource Group '$targetRg'" -ForegroundColor Red
+            Write-Host "   Please ensure you are logged in and the name is correct." -ForegroundColor Yellow
+            exit 1
+        }
+
+        Write-Host "`nEnter the Key Vault name (to store new secrets):" -ForegroundColor Cyan
+        $targetKv = Read-Host "Key Vault Name"
+        if ([string]::IsNullOrWhiteSpace($targetKv)) {
+            Write-Host "Key Vault Name is required." -ForegroundColor Red
+            exit 1
+        }
+        
+        $params = @{
+            ResourceGroupName = $targetRg
+            KeyVaultName = $targetKv
+            Location = $targetLocation
+        }
+        
+        & $integrationScript @params
+    }
+    
     default {
         Write-Host "❌ Invalid deployment mode: $Mode" -ForegroundColor Red
-        Write-Host "   Valid modes: quick, aks, vm, monitoring" -ForegroundColor Yellow
+        Write-Host "   Valid modes: quick, aks, vm, monitoring, integration" -ForegroundColor Yellow
         exit 1
     }
 }
