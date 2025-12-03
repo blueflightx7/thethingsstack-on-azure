@@ -227,12 +227,6 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-04-01' = {
   }
 }
 
-// Reference to existing VNet (if using existing)
-resource existingVnet 'Microsoft.Network/virtualNetworks@2023-04-01' existing = if (useExistingVNet) {
-  name: vnetName
-  scope: resourceGroup(vnetResourceGroup)
-}
-
 // New VNet (only created if not using existing)
 resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = if (!useExistingVNet) {
   name: vnetName

@@ -22,7 +22,9 @@
 - **[Quick Start Deployment](deploy/quick-start.md)** - Get running in 10 minutes
 - **[VM Deployment Guide](deploy/vm-deployment.md)** - Development/test environments
 - **[AKS Deployment Guide](deploy/aks-deployment.md)** - Production Kubernetes deployments
-- **[Brownfield Deployments](deploy/brownfield-guide.md)** - Deploy into existing VNets and infrastructure
+- [**Deployment Orchestration**](deploy/orchestration.md) - How the `deploy.ps1` system works.
+- [**IoT Hub & Data Intelligence**](deploy/integration-deployment.md) - Deploy the Azure data integration stack.
+- [**Brownfield Guide**](deploy/brownfield-guide.md) - Deploying into existing Azure environments.
 - **[DNS Configuration](deploy/dns-configuration.md)** - Custom domains, Azure DNS, and Let's Encrypt
 - **[Parameter Reference](deploy/parameters.md)** - Complete deployment parameter documentation
 - **[CI/CD Setup](deploy/cicd-setup.md)** - GitHub Actions and Azure DevOps pipelines
@@ -32,6 +34,8 @@
 
 - **[Operations Guide](operate/operations-guide.md)** - Daily management tasks and procedures
 - **[Monitoring & Alerts](operate/monitoring.md)** - Azure Monitor, Log Analytics, Application Insights
+- **[Integration Operations](operate/integration-operations.md)** - Managing the IoT Hub integration.
+- **[Fabric Connection](operate/fabric-connection-guide.md)** - Connecting Microsoft Fabric to TTS data.
 - **[Troubleshooting Guide](operate/troubleshooting.md)** - Common issues and solutions
 - **[Backup & Recovery](operate/backup-recovery.md)** - Data protection strategies
 - **[Scaling Guide](operate/scaling.md)** - Vertical and horizontal scaling procedures
@@ -42,6 +46,7 @@
 *Technical deep-dives and API documentation*
 
 - **[Complete Architecture](reference/architecture.md)** - Detailed technical architecture (4,400+ lines)
+- **[Integration Architecture](reference/integration-architecture.md)** - Architecture of the IoT Hub integration.
 - **[Network Topology](reference/network-topology.md)** - VNet, subnets, NSG rules, and traffic flows
 - **[Security Architecture](reference/security-architecture.md)** - Defense-in-depth security model
 - **[Critical Fixes](reference/critical-fixes.md)** - 12 critical fixes that must be preserved
