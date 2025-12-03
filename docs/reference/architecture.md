@@ -48,6 +48,7 @@ _Last updated: October 11, 2025_
 - [11. Cost Optimization](#11-cost-optimization)
 - [12. Future Enhancements](#12-future-enhancements)
 - [13. Appendix](#13-appendix)
+- [14. IoT Hub & Data Intelligence](#14-iot-hub--data-intelligence-integration)
 
 ---
 
