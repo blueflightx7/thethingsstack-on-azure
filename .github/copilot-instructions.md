@@ -15,7 +15,8 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
 │
 ├── Mode: quick ──► deployments/vm/deploy-simple.ps1 ──► deployments/vm/tts-docker-deployment.bicep
 ├── Mode: aks ────► deployments/kubernetes/deploy-aks.ps1 ──► deployments/kubernetes/tts-aks-deployment.bicep
-└── Mode: vm ─────► Inline advanced deployment ──► deployments/vm/tts-docker-deployment.bicep
+├── Mode: vm ─────► Inline advanced deployment ──► deployments/vm/tts-docker-deployment.bicep
+└── Mode: integration ──► deployments/integration/deploy-integration.ps1 ──► deployments/integration/integration.bicep
 ```
 
 **Never suggest using scripts directly** - always route through `deploy.ps1` with `-Mode` parameter.
@@ -100,6 +101,19 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
     docker exec stack_1 ttn-lw-stack is-db migrate \
       --is.database-uri='postgresql://user:pass@server/db?sslmode=require'
     ```
+
+### 13. Integration Deployment (Option 6)
+
+**Brownfield Awareness**:
+- **Region Detection**: `deploy.ps1` auto-detects the region of the target Resource Group.
+- **Monitoring Selection**: `deploy-integration.ps1` detects existing Log Analytics/App Insights.
+- **Reuse/Create/Skip**: User is prompted to Reuse existing, Create new, or Skip monitoring.
+- **Bicep Logic**: Uses `enableMonitoring` and `createMonitoringResources` flags to conditionally deploy resources and configure Function App settings.
+
+**Security & Compliance**:
+- **Storage**: Must use `minimumTlsVersion: 'TLS1_2'` and `supportsHttpsTrafficOnly: true`.
+- **Functions**: Use stateless `HttpClient` pattern (avoid `CreateCloudBlobClient` connection limits).
+- **Naming**: Storage account names must not contain hyphens (use `replace(prefix, '-', '')`).
 
 ### 2. Bicep Template Structure
 

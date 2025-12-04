@@ -48,6 +48,7 @@ _Last updated: October 11, 2025_
 - [11. Cost Optimization](#11-cost-optimization)
 - [12. Future Enhancements](#12-future-enhancements)
 - [13. Appendix](#13-appendix)
+- [14. IoT Hub & Data Intelligence](#14-iot-hub--data-intelligence-integration)
 
 ---
 
@@ -4437,6 +4438,31 @@ kubectl exec -n tts redis-0 -- redis-cli SHUTDOWN
 | | | | - Complete network flow diagrams |
 | | | | - Migration path VM → AKS |
 | | | | - Security hardening for Kubernetes |
+
+---
+
+## 14. IoT Hub & Data Intelligence Integration
+
+The "IoT Hub & Data Intelligence" module (Deployment Option 6) extends the core TTS architecture to provide advanced analytics and data retention capabilities.
+
+### 14.1 High-Level Design
+
+This integration runs parallel to the main TTS deployment (VM or AKS). It uses a serverless, event-driven architecture to ingest data from TTS Webhooks and store it in Azure SQL.
+
+*   **Ingestion**: Azure IoT Hub (MQTT/HTTP)
+*   **Buffering**: Azure Event Hubs
+*   **Processing**: Azure Functions (Stateless)
+*   **Storage**: Azure SQL Database (Serverless) & Blob Storage
+
+For a detailed deep-dive, see the [Integration Architecture](integration-architecture.md) document.
+
+### 14.2 Data Flow
+
+1.  TTS Application Server sends Uplink JSON to IoT Hub Webhook.
+2.  IoT Hub routes message to Event Hub.
+3.  Function App triggers on batch of events.
+4.  Function App parses JSON and inserts into SQL Database.
+5.  Power BI / Fabric queries SQL Database for visualization.
 
 ---
 

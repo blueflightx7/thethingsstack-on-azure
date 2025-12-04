@@ -127,10 +127,20 @@ You will see an interactive menu:
     • VM with custom configuration
     • Best for: Custom requirements, specific sizing
 
-[4] Compare All Deployment Options
+[4] Show Deployment Architecture Comparison
+
+[5] Configure Monitoring Only (Existing Deployment)
+
+[6] Add IoT Hub & Data Intelligence  ← NEW INTEGRATION
+    • IoT Hub, Event Hubs, SQL, Azure Fabric
+    • Best for: Data analytics, real-time dashboards
+    • Cost: +$30-45/month (add-on to existing TTS)
+    • Requires: Non-Enterprise TTS deployment
 ```
 
 **Choose option [2] for production-scale Kubernetes deployment.**
+
+**Choose option [6] to add data intelligence to existing TTS deployment.**
 
 ---
 
