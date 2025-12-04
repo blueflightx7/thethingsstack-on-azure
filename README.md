@@ -62,6 +62,7 @@ This repository provides **Infrastructure as Code (IaC)** for deploying [The Thi
 | **Scalability** | Vertical scaling (VM resize) or horizontal (AKS migration) |
 
 **📖 See**: 
+- [docs/index.md](docs/index.md) - **Documentation Hub (Start Here)**
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Complete architecture documentation
 - [Quick Start](#-quick-start) - Get started in minutes
 - [Deployment Options](#-deployment-options) - Choose your deployment mode
@@ -193,6 +194,21 @@ chmod +x deploy.sh
 - Use case: Production with 100K+ devices, high availability, auto-scaling
 
 **Deployment Time**: 20-30 minutes (cluster provisioning + application deployment)
+
+#### Option 6: IoT Hub & Data Intelligence (Integration)
+
+**PowerShell**:
+```powershell
+# Deploy the integration stack (requires existing TTS deployment)
+.\deploy.ps1 -Mode integration -Location "centralus"
+```
+
+**Features**:
+- Azure IoT Hub & Event Hubs
+- Serverless SQL Database
+- Power BI / Fabric Integration
+
+**📖 See**: [Integration Deployment Guide](docs/deploy/integration-deployment.md)
 
 ---
 
