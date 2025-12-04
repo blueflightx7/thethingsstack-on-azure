@@ -63,7 +63,7 @@ This repository provides **Infrastructure as Code (IaC)** for deploying [The Thi
 
 **📖 See**: 
 - [docs/index.md](docs/index.md) - **Documentation Hub (Start Here)**
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Complete architecture documentation
+- [docs/reference/architecture.md](docs/reference/architecture.md) - Complete architecture documentation
 - [Quick Start](#-quick-start) - Get started in minutes
 - [Deployment Options](#-deployment-options) - Choose your deployment mode
 
@@ -332,9 +332,9 @@ After deployment completes (~10 minutes):
 
 
 **📖 See**: 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Comprehensive architecture guide (2,500+ lines)
-- [docs/DEPLOYMENT_ORCHESTRATION.md](docs/DEPLOYMENT_ORCHESTRATION.md) - Deployment system details
-- [docs/CI-CD-ARCHITECTURE.md](docs/CI-CD-ARCHITECTURE.md) - CI/CD pipeline architecture
+- [docs/reference/architecture.md](docs/reference/architecture.md) - Comprehensive architecture guide (4,400+ lines)
+- [docs/deploy/orchestration.md](docs/deploy/orchestration.md) - Deployment system details
+- [docs/reference/cicd-architecture.md](docs/reference/cicd-architecture.md) - CI/CD pipeline architecture
 
 
 
@@ -423,9 +423,9 @@ bicep build deployments/kubernetes/tts-aks-deployment.bicep
 ```
 
 **📖 See**: 
-- [docs/DEPLOYMENT-PARAMETERS-GUIDE.md](docs/DEPLOYMENT-PARAMETERS-GUIDE.md) - Complete parameter reference (27KB)
-- [docs/DEPLOYMENT_ORCHESTRATION.md](docs/DEPLOYMENT_ORCHESTRATION.md) - Orchestration system guide
-- [docs/CI-CD-SETUP-GUIDE.md](docs/CI-CD-SETUP-GUIDE.md) - CI/CD pipeline setup
+- [docs/deploy/parameters.md](docs/deploy/parameters.md) - Complete parameter reference
+- [docs/deploy/orchestration.md](docs/deploy/orchestration.md) - Orchestration system guide
+- [docs/deploy/cicd-setup.md](docs/deploy/cicd-setup.md) - CI/CD pipeline setup
 
 ---
 
@@ -510,7 +510,7 @@ services:
 | **Gateway (Basics Station)** | 8887 | WSS | LoRa Basics Station WebSocket |
 | **HTTP** | 80 | HTTP | Let's Encrypt challenges, redirects to HTTPS |
 
-**📖 See**: [docs/ARCHITECTURE.md § Application Architecture](docs/ARCHITECTURE.md#4-application-architecture) for detailed component breakdown
+**📖 See**: [docs/reference/architecture.md § Application Architecture](docs/reference/architecture.md#5-application-architecture) for detailed component breakdown
 
 ---
 
@@ -531,9 +531,9 @@ This deployment includes **7 critical security fixes** identified during product
 | **#7** | **Admin password stdin bug** | **Use `--password` flag instead of printf** | ✅ **Fixed** |
 
 **📖 See**: 
-- [docs/DEPLOYMENT_FIXES_SUMMARY.md](docs/DEPLOYMENT_FIXES_SUMMARY.md) - All 7 fixes detailed
-- [docs/SECURITY_FIX_SUMMARY.md](docs/SECURITY_FIX_SUMMARY.md) - Security-specific fixes (#6, #7)
-- [docs/LOGIN_FIX.md](docs/LOGIN_FIX.md) - Admin authentication fix (#7)
+- [docs/reference/critical-fixes.md](docs/reference/critical-fixes.md) - All 12 critical fixes detailed
+- [docs/reference/security-fixes.md](docs/reference/security-fixes.md) - Security-specific fixes
+- [docs/history/login-fix.md](docs/history/login-fix.md) - Admin authentication fix
 
 ---
 
@@ -580,7 +580,7 @@ graph LR
 | **Redis** | In-memory (no persistence) | Localhost only (no TLS) |
 | **Console** | N/A | HTTPS (Let's Encrypt TLS 1.2/1.3) |
 
-**📖 See**: [docs/ARCHITECTURE.md § Security Architecture](docs/ARCHITECTURE.md#7-security-architecture) for threat model, compliance mapping
+**📖 See**: [docs/reference/architecture.md § Security Architecture](docs/reference/architecture.md#15-security-architecture) for threat model, compliance mapping
 
 ---
 
@@ -604,8 +604,8 @@ TTS Container → Secrets injected into tts.yml
 ```
 
 **📖 See**: 
-- [docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md) - Production security checklist
-- [docs/ARCHITECTURE.md § Security Architecture](docs/ARCHITECTURE.md#7-security-architecture) - Threat model & compliance
+- [docs/reference/security-hardening.md](docs/reference/security-hardening.md) - Production security checklist
+- [docs/reference/architecture.md § Security Architecture](docs/reference/architecture.md#15-security-architecture) - Threat model & compliance
 
 ---
 
@@ -717,7 +717,7 @@ Headers:
 }
 ```
 
-**📖 See**: [docs/ARCHITECTURE.md § Data Flows & Integration](docs/ARCHITECTURE.md#6-data-flows--integration) for MQTT, gRPC examples
+**📖 See**: [docs/reference/architecture.md § Data Flows & Integration](docs/reference/architecture.md#7-data-flows--integration) for MQTT, gRPC examples
 
 ---
 
@@ -796,7 +796,7 @@ pg_dump \
 pg_restore -h {db-server} -U {username} -d ttn_lorawan --clean backup.dump
 ```
 
-**📖 See**: [docs/ARCHITECTURE.md § Operations & Maintenance](docs/ARCHITECTURE.md#8-operations--maintenance)
+**📖 See**: [docs/reference/architecture.md § Operations & Maintenance](docs/reference/architecture.md#9-operations--maintenance)
 
 ---
 
@@ -828,7 +828,7 @@ az vm start --resource-group rg-tts-prod --name tts-vm
 | 50,000 - 100,000 | 500+ | Standard_D8s_v3 (8 vCPU, 32GB) | ~$280 |
 | > 100,000 | > 1,000 | **Migrate to AKS** | Custom |
 
-**📖 See**: [docs/ARCHITECTURE.md § Scaling & Performance](docs/ARCHITECTURE.md#9-scaling--performance)
+**📖 See**: [docs/reference/architecture.md § Scaling & Performance](docs/reference/architecture.md#10-scaling--performance)
 
 ---
 
@@ -880,7 +880,7 @@ ContainerLog
 | render timechart
 ```
 
-**📖 See**: [docs/ARCHITECTURE.md § Monitoring & Alerting](docs/ARCHITECTURE.md#84-monitoring--alerting)
+**📖 See**: [docs/reference/architecture.md § Monitoring & Alerting](docs/reference/architecture.md#monitoring--observability)
 
 ---
 
@@ -978,7 +978,7 @@ az postgres flexible-server update \
 
 **Total Potential Savings**: Up to **$100/month** with all optimizations
 
-**📖 See**: [docs/ARCHITECTURE.md § Cost Optimization](docs/ARCHITECTURE.md#10-cost-optimization)
+**📖 See**: [docs/reference/architecture.md § Cost Optimization](docs/reference/architecture.md#11-cost-optimization)
 
 ---
 
@@ -1010,7 +1010,7 @@ docker compose exec stack ttn-lw-stack is-db create-admin-user \
   --password '{admin-password}'
 ```
 
-**📖 See**: [LOGIN_FIX.md](LOGIN_FIX.md) for detailed password authentication fix
+**📖 See**: [docs/history/login-fix.md](docs/history/login-fix.md) for detailed password authentication fix
 
 ---
 
@@ -1197,7 +1197,7 @@ FROM pg_stat_activity
 WHERE state = 'idle in transaction' AND now() - query_start > interval '10 minutes';
 ```
 
-**📖 See**: [docs/ARCHITECTURE.md § Troubleshooting Guide](docs/ARCHITECTURE.md#87-troubleshooting-guide)
+**📖 See**: [docs/reference/architecture.md § Troubleshooting Guide](docs/reference/architecture.md#troubleshooting)
 
 ---
 
@@ -1207,12 +1207,13 @@ WHERE state = 'idle in transaction' AND now() - query_start > interval '10 minut
 
 | Document | Description | Lines |
 |----------|-------------|-------|
-| **[README.md](README.md)** | ⭐ This file - Quick start and overview | 800+ |
-| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | 🏗️ Comprehensive architecture guide (13 sections, 10+ diagrams) | 2,500+ |
-| **[docs/DEPLOYMENT_FIXES_SUMMARY.md](docs/DEPLOYMENT_FIXES_SUMMARY.md)** | 🔧 All 7 critical fixes applied to deployment | 319 |
-| **[docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md)** | 🔐 Production security checklist and best practices | 530 |
-| **[docs/SECURITY_FIX_SUMMARY.md](docs/SECURITY_FIX_SUMMARY.md)** | 🛡️ Security-specific fixes (#6 SSH, #7 password) | 250 |
-| **[docs/LOGIN_FIX.md](docs/LOGIN_FIX.md)** | 🔑 Admin password authentication fix details | 82 |
+| **[README.md](README.md)** | ⭐ This file - Quick start and overview | 1,400+ |
+| **[docs/index.md](docs/index.md)** | 📚 Documentation hub - Navigation to all guides | 200+ |
+| **[docs/reference/architecture.md](docs/reference/architecture.md)** | 🏗️ Comprehensive architecture guide (14+ sections, diagrams) | 4,400+ |
+| **[docs/reference/critical-fixes.md](docs/reference/critical-fixes.md)** | 🔧 All 12 critical fixes applied to deployment | 500+ |
+| **[docs/reference/security-hardening.md](docs/reference/security-hardening.md)** | 🔐 Production security checklist and best practices | 500+ |
+| **[docs/history/login-fix.md](docs/history/login-fix.md)** | 🔑 Admin password authentication fix details | 100+ |
+| **[docs/deploy/integration-deployment.md](docs/deploy/integration-deployment.md)** | 🔌 IoT Hub & Data Intelligence integration guide | 1,000+ |
 
 ### Documentation Map
 
@@ -1236,17 +1237,20 @@ WHERE state = 'idle in transaction' AND now() - query_start > interval '10 minut
 │  │             │                                              │
 │  │             └─► Specialized Docs:                         │
 │  │                  │                                         │
-│  │                  ├─► docs/DEPLOYMENT_FIXES_SUMMARY.md     │
-│  │                  │    (If deployment issues)              │
+│  │                  ├─► docs/deploy/integration-deployment.md │
+│                  │    (IoT Hub & Data Intelligence)        │
+│                  │                                         │
+│                  ├─► docs/reference/critical-fixes.md     │
+│  │                  │    (12 critical deployment fixes)      │
 │  │                  │                                         │
-│  │                  ├─► docs/SECURITY_HARDENING.md           │
-│  │                  │    (Production checklist)              │
+│  │                  ├─► docs/reference/security-hardening.md │
+│  │                  │    (Production security checklist)     │
 │  │                  │                                         │
-│  │                  ├─► docs/SECURITY_FIX_SUMMARY.md         │
-│  │                  │    (SSH & password fixes)              │
+│  │                  ├─► docs/reference/security-fixes.md     │
+│  │                  │    (Security-specific fixes)           │
 │  │                  │                                         │
-│  │                  └─► docs/LOGIN_FIX.md                    │
-│  │                       (Admin login issues)                │
+│  │                  └─► docs/history/login-fix.md            │
+│  │                       (Admin authentication fix)          │
 │  │                                                            │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -1312,7 +1316,7 @@ az deployment group what-if \
 | **Deployment Issues** | Check [Troubleshooting](#-troubleshooting) section above |
 | **The Things Stack Configuration** | [TTS Forum](https://www.thethingsnetwork.org/forum/) |
 | **Azure Infrastructure** | [Azure Support](https://azure.microsoft.com/support/) |
-| **Security Concerns** | [SECURITY_HARDENING.md](SECURITY_HARDENING.md) |
+| **Security Concerns** | [docs/reference/security-hardening.md](docs/reference/security-hardening.md) |
 | **Bug Reports** | [GitHub Issues](https://github.com/blueflightx7/thethingsstack-on-azure/issues) |
 
 ### Community
@@ -1350,8 +1354,8 @@ Before going to production, ensure:
 - [ ] **Purchase Reserved Instances** for cost savings
 
 **📖 See**: 
-- [docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md) - Complete production checklist
-- [docs/ARCHITECTURE.md § Operations](docs/ARCHITECTURE.md#8-operations--maintenance) - Operational procedures
+- [docs/reference/security-hardening.md](docs/reference/security-hardening.md) - Complete production checklist
+- [docs/reference/architecture.md § Operations](docs/reference/architecture.md#9-operations--maintenance) - Operational procedures
 
 ---
 
