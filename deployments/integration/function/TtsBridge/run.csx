@@ -82,6 +82,8 @@ private static string connectionString = Environment.GetEnvironmentVariable("Bri
 
 public static async Task<IActionResult> Run(HttpRequest req, ILogger log)
 {
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    
     try 
     {
         if (string.IsNullOrEmpty(connectionString))
@@ -114,38 +116,62 @@ public static async Task<IActionResult> Run(HttpRequest req, ILogger log)
         // Generate SAS Token
         string sasToken = GenerateSasToken(hostName, deviceId, sharedAccessKey);
 
-        // Send to IoT Hub REST API
+        // Send to IoT Hub REST API with 15-second timeout
         // Endpoint: https://{hostName}/devices/{deviceId}/messages/events?api-version=2020-03-13
         string uri = $"https://{hostName}/devices/{deviceId}/messages/events?api-version=2020-03-13";
         
         var content = new StringContent(requestBody, Encoding.UTF8, "application/json");
         
-        // Add Routing Properties as Headers
-        // Format: iothub-app-{property-name}
-        content.Headers.Add("iothub-app-deviceId", actualDeviceId);
-        content.Headers.Add("iothub-app-messageType", messageType);
-        content.Headers.Add("iothub-app-source", "tts-webhook");
+        // Create CancellationToken with 15-second timeout
+        // This prevents the 100-second default HttpClient timeout that causes "hanging"
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(req.HttpContext.RequestAborted);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
 
-        // Add Authorization
-        httpClient.DefaultRequestHeaders.Authorization = null; // Clear previous
+        // Build HTTP request with proper headers
+        // IMPORTANT: Routing properties (iothub-app-*) go on request.Headers, NOT content.Headers
+        // IoT Hub reads these headers for message routing, not from content headers
         var request = new HttpRequestMessage(HttpMethod.Post, uri);
-        request.Headers.Add("Authorization", sasToken);
         request.Content = content;
+        
+        // Add Routing Properties as Request Headers (not content headers)
+        request.Headers.Add("iothub-app-deviceId", actualDeviceId);
+        request.Headers.Add("iothub-app-messageType", messageType);
+        request.Headers.Add("iothub-app-source", "tts-webhook");
+        
+        // Add Authorization (per-request, thread-safe)
+        request.Headers.Add("Authorization", sasToken);
 
-        var response = await httpClient.SendAsync(request);
+        // Send request with timeout and response header optimization
+        // ResponseHeadersRead completes task as soon as headers arrive (doesn't wait for body)
+        var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        sw.Stop();
 
         if (!response.IsSuccessStatusCode)
         {
             string responseBody = await response.Content.ReadAsStringAsync();
-            log.LogError($"IoT Hub Error: {response.StatusCode} - {responseBody}");
+            log.LogError($"IoT Hub Error: {response.StatusCode} - {responseBody} (took {sw.ElapsedMilliseconds}ms)");
             return new StatusCodeResult((int)response.StatusCode);
         }
 
+        log.LogInformation($"Forwarded to IoT Hub. Device: {actualDeviceId} (took {sw.ElapsedMilliseconds}ms)");
         return new OkObjectResult($"Forwarded to IoT Hub. Device: {actualDeviceId}");
+    }
+    catch (TaskCanceledException)
+    {
+        sw.Stop();
+        log.LogError($"IoT Hub request timed out after 15 seconds (total execution: {sw.ElapsedMilliseconds}ms)");
+        return new StatusCodeResult(504); // Gateway Timeout
+    }
+    catch (HttpRequestException ex)
+    {
+        sw.Stop();
+        log.LogError($"Network error forwarding message: {ex.Message} (took {sw.ElapsedMilliseconds}ms)");
+        return new StatusCodeResult(502); // Bad Gateway
     }
     catch (Exception ex)
     {
-        log.LogError($"Error forwarding message: {ex.Message}");
+        sw.Stop();
+        log.LogError($"Error forwarding message: {ex.Message} (took {sw.ElapsedMilliseconds}ms)");
         return new StatusCodeResult(500);
     }
 }
