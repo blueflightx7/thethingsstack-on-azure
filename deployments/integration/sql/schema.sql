@@ -57,6 +57,7 @@ BEGIN
         DevEUI NVARCHAR(50) NOT NULL UNIQUE,
         HardwareID NVARCHAR(100),
         Name NVARCHAR(100),
+        ApplicationID NVARCHAR(100), -- TTS Application ID
         HiveID INT,
         FirmwareVersion NVARCHAR(50),
         HardwareVersion NVARCHAR(50),
@@ -93,9 +94,28 @@ BEGIN
         Humidity DECIMAL(5,2),          -- h
         Weight_KG DECIMAL(10,3),        -- weight_kg
         BatteryVoltage DECIMAL(5,2),    -- bv
+        BatteryPercent INT,             -- bat_perc
         SoundFrequency DECIMAL(10,2),   -- sound
         
-        -- Raw Payload for debugging
+        -- FFT Bins (Sound Frequency Analysis)
+        FFT_Bin_71_122 INT,             -- s_bin_71_122
+        FFT_Bin_122_173 INT,            -- s_bin_122_173
+        FFT_Bin_173_224 INT,            -- s_bin_173_224
+        FFT_Bin_224_276 INT,            -- s_bin_224_276
+        FFT_Bin_276_327 INT,            -- s_bin_276_327
+        FFT_Bin_327_378 INT,            -- s_bin_327_378
+        FFT_Bin_378_429 INT,            -- s_bin_378_429
+        FFT_Bin_429_480 INT,            -- s_bin_429_480
+        FFT_Bin_480_532 INT,            -- s_bin_480_532
+        FFT_Bin_532_583 INT,            -- s_bin_532_583
+        
+        -- Gateway Metadata (Location & Signal Quality)
+        Latitude DECIMAL(9,6),          -- gateway location
+        Longitude DECIMAL(9,6),         -- gateway location
+        RSSI INT,                       -- signal strength
+        SNR DECIMAL(5,2),               -- signal-to-noise ratio
+        
+        -- Raw Payload for debugging and re-ingestion
         RawPayload NVARCHAR(MAX)
     );
     
