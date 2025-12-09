@@ -369,6 +369,10 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
           name: 'SqlConnectionString'
           value: 'Server=tcp:${sqlServer.properties.fullyQualifiedDomainName},1433;Initial Catalog=${sqlDb.name};Persist Security Info=False;User ID=${sqlAdminLogin};Password=${sqlAdminPassword};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
         }
+        {
+          name: 'EventHubConnection'
+          value: eventHubAuthRule.listKeys().primaryConnectionString
+        }
       ]
     }
   }

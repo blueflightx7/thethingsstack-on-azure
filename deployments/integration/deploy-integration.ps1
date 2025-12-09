@@ -181,12 +181,12 @@ try {
         az iot hub device-identity create --device-id $deviceId --hub-name $iotHubName | Out-Null
     }
     
-    # Get Connection String
-    $connString = az iot hub device-identity connection-string show --device-id $deviceId --hub-name $iotHubName --query connectionString -o tsv
+    # Get IoT Hub service-level connection string (not device-specific)
+    $iotHubConnString = az iot hub connection-string show --hub-name $iotHubName --policy-name iothubowner --query connectionString -o tsv
     
-    # Set App Setting
-    Write-Host "Setting BridgeConnectionString..." -ForegroundColor Gray
-    az functionapp config appsettings set --name $functionAppName --resource-group $ResourceGroupName --settings "BridgeConnectionString=$connString" | Out-Null
+    # Set App Setting (service connection for auto-registration)
+    Write-Host "Setting IoTHubConnectionString (service-level)..." -ForegroundColor Gray
+    az functionapp config appsettings set --name $functionAppName --resource-group $ResourceGroupName --settings "IoTHubConnectionString=$iotHubConnString" | Out-Null
     
     # Deploy Code
     Write-Host "Deploying Function Code..." -ForegroundColor Yellow
