@@ -302,7 +302,7 @@ private static string GenerateSasTokenForRegistry(string hostName, string keyNam
     return $"SharedAccessSignature sr={WebUtility.UrlEncode(resourceUri)}&sig={WebUtility.UrlEncode(signature)}&se={expiry}&skn={keyName}";
 }
 
-// Generate SAS token for device-level telemetry (uses device key)
+// Generate SAS token for device-level telemetry (uses device key, not service key)
 private static string GenerateSasToken(string hostName, string deviceId, string deviceKey, int expiryInSeconds = 3600)
 {
     string resourceUri = $"{hostName}/devices/{deviceId}";
@@ -314,24 +314,4 @@ private static string GenerateSasToken(string hostName, string deviceId, string 
     string signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(stringToSign)));
 
     return $"SharedAccessSignature sr={WebUtility.UrlEncode(resourceUri)}&sig={WebUtility.UrlEncode(signature)}&se={expiry}";
-}
-
-private static string GenerateSasToken(string resourceUri, string keyName, string key, int expiryInSeconds = 3600)
-{
-    TimeSpan fromEpochStart = DateTime.UtcNow - new DateTime(1970, 1, 1);
-    string expiry = Convert.ToString((int)fromEpochStart.TotalSeconds + expiryInSeconds);
-
-    string stringToSign = WebUtility.UrlEncode(resourceUri) + "\n" + expiry;
-
-    HMACSHA256 hmac = new HMACSHA256(Convert.FromBase64String(key));
-    string signature = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(stringToSign)));
-
-    return $"SharedAccessSignature sr={WebUtility.UrlEncode(resourceUri)}&sig={WebUtility.UrlEncode(signature)}&se={expiry}";
-}
-
-// Overload for Device Connection String (no KeyName needed usually, but format varies)
-private static string GenerateSasToken(string hostName, string deviceId, string key)
-{
-    string resourceUri = $"{hostName}/devices/{deviceId}";
-    return GenerateSasToken(resourceUri, null, key);
 }
