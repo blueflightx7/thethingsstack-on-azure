@@ -187,6 +187,8 @@ try {
     # Set App Setting (service connection for auto-registration)
     Write-Host "Setting IoTHubConnectionString (service-level)..." -ForegroundColor Gray
     az functionapp config appsettings set --name $functionAppName --resource-group $ResourceGroupName --settings "IoTHubConnectionString=$iotHubConnString" | Out-Null
+    # Enable remote build so function.proj packages restore during zip deploy
+    az functionapp config appsettings set --name $functionAppName --resource-group $ResourceGroupName --settings "SCM_DO_BUILD_DURING_DEPLOYMENT=true" "ENABLE_ORYX_BUILD=true" | Out-Null
     
     # Deploy Code
     Write-Host "Deploying Function Code..." -ForegroundColor Yellow

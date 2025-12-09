@@ -373,6 +373,15 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
           name: 'EventHubConnection'
           value: eventHubAuthRule.listKeys().primaryConnectionString
         }
+        {
+          // Force Kudu/Oryx remote build so csx NuGet packages restore during zip deployment
+          name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
+          value: 'true'
+        }
+        {
+          name: 'ENABLE_ORYX_BUILD'
+          value: 'true'
+        }
       ]
     }
   }
