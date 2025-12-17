@@ -135,13 +135,20 @@ try {
 
     $outDir = Join-Path $DashboardPath 'out'
     if (-not (Test-Path $outDir)) {
-        Write-Host "❌ Build output not found: $outDir" -ForegroundColor Red
+        Write-Host "❌ Build output directory not found: $outDir" -ForegroundColor Red
+        exit 1
+    }
+
+    # Verify build output contains index.html (critical for SWA)
+    if (-not (Test-Path (Join-Path $outDir 'index.html'))) {
+        Write-Host "❌ 'index.html' not found in $outDir" -ForegroundColor Red
+        Write-Host "   Ensure 'npm run build' completed successfully and next.config.mjs has output: 'export'." -ForegroundColor Yellow
         exit 1
     }
 
     # Deploy
-    $env:SWA_CLI_DEPLOYMENT_TOKEN = $DeploymentToken
-
+    # We pass the token explicitly via flag to ensure it propagates correctly to npx/swa process
+    
     Write-Host "Deploying to Static Web App (production environment)..." -ForegroundColor Yellow
     if (-not [string]::IsNullOrWhiteSpace($ApiPath)) {
         Write-Host "   Including API from: $ApiPath" -ForegroundColor Gray
@@ -150,16 +157,17 @@ try {
     # Change to dashboard directory to simplify paths
     Push-Location $DashboardPath
     try {
-        $deployCmd = "deploy ./out --swa-config-location . --env production"
+        $deployCmd = "deploy ./out --swa-config-location . --env production --deployment-token $DeploymentToken"
         if (-not [string]::IsNullOrWhiteSpace($ApiPath)) {
             $deployCmd += " --api-location `"$ApiPath`""
         }
 
         if (Get-Command swa -ErrorAction SilentlyContinue) {
+            Write-Host "   Using local 'swa' CLI..." -ForegroundColor Gray
             Invoke-Expression "swa $deployCmd" | Out-Host
         }
         else {
-            Write-Host "Static Web Apps CLI (swa) not found; attempting via npx..." -ForegroundColor Gray
+            Write-Host "   Using 'npx @azure/static-web-apps-cli'..." -ForegroundColor Gray
             Assert-Command -Name 'npx' -FailureMessage "npx not found on PATH."
             
             Invoke-Expression "npx -y @azure/static-web-apps-cli@latest $deployCmd" | Out-Host
@@ -178,6 +186,4 @@ try {
 }
 finally {
     Pop-Location
-    # Clear token from env for the remainder of the session
-    Remove-Item Env:SWA_CLI_DEPLOYMENT_TOKEN -ErrorAction SilentlyContinue
 }
