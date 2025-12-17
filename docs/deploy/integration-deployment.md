@@ -470,7 +470,8 @@ curl -X POST \
       "format": "json",
       "base_url": "'"$WEBHOOK_URL"'",
       "headers": {
-        "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "x-functions-key": "'"$FUNCTION_KEY"'"
       },
       "uplink_message": {
         "path": ""
@@ -506,6 +507,14 @@ curl -X POST \
    ```
 
 #### 1.3 Run Configuration Script
+
+Before running, set the `FUNCTION_KEY` used for the `x-functions-key` header. The deployment stores it in Key Vault as `integration-webhook-functions-key`.
+
+From your deployment machine (where you ran `deploy.ps1`), retrieve it with:
+
+```bash
+az keyvault secret show --vault-name <your-keyvault-name> --name integration-webhook-functions-key --query value -o tsv
+```
 
 Execute on your TTS VM:
 

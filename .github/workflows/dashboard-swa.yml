@@ -1,0 +1,73 @@
+name: Dashboard (SWA) - Build and Deploy
+
+on:
+  push:
+    branches:
+      - 'release/**'
+      - 'dev/**'
+    paths:
+      - 'dashboard/**'
+      - '.github/workflows/dashboard-swa.yml'
+  pull_request:
+    branches:
+      - master
+      - 'release/**'
+      - 'dev/**'
+    paths:
+      - 'dashboard/**'
+      - '.github/workflows/dashboard-swa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-swa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (no deploy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install deps
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Build
+        working-directory: dashboard
+        run: npm run build
+
+  deploy:
+    name: Deploy to Azure Static Web Apps
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Uses the SWA deployment token (do not commit it).
+      # Configure repository secret: SWA_DASHBOARD_DEPLOYMENT_TOKEN
+      - name: Deploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          azure_static_web_apps_api_token: ${{ secrets.SWA_DASHBOARD_DEPLOYMENT_TOKEN }}
+          app_location: dashboard
+          api_location: ''
+          output_location: out
+          skip_api_build: true

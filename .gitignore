@@ -359,3 +359,8 @@ __azurite_db*__.json
 # - Fill in real values locally (ignored by git)
 # - Or use Key Vault references and secure parameters
 # ============================================================================
+
+# .NET
+bin/
+obj/
+*.deb

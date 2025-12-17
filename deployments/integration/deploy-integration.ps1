@@ -176,7 +176,7 @@ try {
     $deviceId = "TTS-Bridge"
     Write-Host "Checking/Creating IoT Hub device identity: $deviceId" -ForegroundColor Gray
     # Check if device exists, if not create it
-    $deviceExists = az iot hub device-identity show --device-id $deviceId --hub-name $iotHubName --output none 2>&1
+    az iot hub device-identity show --device-id $deviceId --hub-name $iotHubName --output none 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
         az iot hub device-identity create --device-id $deviceId --hub-name $iotHubName | Out-Null
     }
@@ -200,6 +200,22 @@ try {
     
     az functionapp deployment source config-zip --resource-group $ResourceGroupName --name $functionAppName --src $zipPath
     Remove-Item $zipPath
+
+    # Retrieve a Function key for header-based webhook auth (x-functions-key)
+    # NOTE: We intentionally do NOT append ?code= to the URL because the target environment requires header auth.
+    Write-Host "Retrieving Function key for TTS webhook auth..." -ForegroundColor Gray
+    $functionKey = az functionapp keys list --name $functionAppName --resource-group $ResourceGroupName --query "functionKeys.default" -o tsv
+    if ([string]::IsNullOrWhiteSpace($functionKey)) {
+        $functionKey = az functionapp keys list --name $functionAppName --resource-group $ResourceGroupName --query "hostKeys.default" -o tsv
+    }
+
+    $functionKeySecretName = "integration-webhook-functions-key"
+    if (-not [string]::IsNullOrWhiteSpace($functionKey)) {
+        Write-Host "Storing Function key in Key Vault secret '$functionKeySecretName'..." -ForegroundColor Gray
+        az keyvault secret set --vault-name $KeyVaultName --name $functionKeySecretName --value $functionKey --output none | Out-Null
+    } else {
+        Write-Warning "Could not retrieve a Function key automatically. You'll need to add it manually when configuring the TTS webhook header 'x-functions-key'."
+    }
     
     Write-Host "✓ Function App Configured" -ForegroundColor Green
 }
@@ -242,6 +258,7 @@ $helperContent = @"
 WEBHOOK_URL="$webhookUrl"
 API_KEY="<YOUR_TTS_API_KEY>"
 APP_ID="<YOUR_APP_ID>"
+FUNCTION_KEY="<YOUR_FUNCTION_KEY>"  # Key Vault secret: $functionKeySecretName
 
 echo "Configuring Webhook for \$APP_ID..."
 
@@ -252,6 +269,9 @@ curl -X POST \
   -d '{
     "ids": { "webhook_id": "azure-integration" },
     "base_url": "'"\$WEBHOOK_URL"'",
+        "headers": {
+            "x-functions-key": "'"\$FUNCTION_KEY"'"
+        },
     "format": "json",
     "uplink_message": { "path": "" },
     "join_accept": { "path": "" },
@@ -277,11 +297,16 @@ Write-Host "╚═════════════════════�
 Write-Host "`n1. Webhook URL:" -ForegroundColor White
 Write-Host "   $webhookUrl" -ForegroundColor Green
 
-Write-Host "`n2. Fabric Event Hub Connection String:" -ForegroundColor White
+Write-Host "`n2. Function Key (for x-functions-key header):" -ForegroundColor White
+Write-Host "   Stored in Key Vault secret: $functionKeySecretName" -ForegroundColor Green
+Write-Host "   Retrieve with:" -ForegroundColor Gray
+Write-Host "   az keyvault secret show --vault-name $KeyVaultName --name $functionKeySecretName --query value -o tsv" -ForegroundColor Gray
+
+Write-Host "`n3. Fabric Event Hub Connection String:" -ForegroundColor White
 Write-Host "   $eventHubConn" -ForegroundColor Green
 Write-Host "   (Use this in Azure Fabric -> Real-Time Intelligence -> Eventstream)" -ForegroundColor Gray
 
-Write-Host "`n3. Next Steps:" -ForegroundColor White
+Write-Host "`n4. Next Steps:" -ForegroundColor White
 Write-Host "   a. Run 'configure-tts-webhook.sh' on your TTS VM" -ForegroundColor Gray
 Write-Host "   b. Connect Azure Fabric using the connection string above" -ForegroundColor Gray
 Write-Host "   c. Verify data is flowing to SQL Database '$dbName'" -ForegroundColor Gray

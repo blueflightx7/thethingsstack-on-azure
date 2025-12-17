@@ -1,0 +1,55 @@
+# Azure DevOps pipeline: build + deploy the dashboard Static Web App
+#
+# Prereqs:
+# - Create an Azure Static Web App (via deployments/dashboard/dashboard.bicep or Portal)
+# - In Azure Portal -> Static Web App -> Manage deployment token
+# - In Azure DevOps -> Pipelines -> Library or Pipeline variables:
+#     - Set secret variable: SWA_DASHBOARD_DEPLOYMENT_TOKEN
+#
+# Notes:
+# - This pipeline is scoped to dashboard changes only.
+# - Uses the AzureStaticWebApp@0 task which builds and deploys.
+
+trigger:
+  branches:
+    include:
+      - release/*
+      - dev/*
+  paths:
+    include:
+      - dashboard/*
+      - dashboard/**
+      - azure-pipelines-dashboard.yml
+
+pr:
+  branches:
+    include:
+      - master
+      - release/*
+      - dev/*
+  paths:
+    include:
+      - dashboard/*
+      - dashboard/**
+      - azure-pipelines-dashboard.yml
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  # Non-secret build variables
+  APP_LOCATION: 'dashboard'
+  API_LOCATION: ''
+  OUTPUT_LOCATION: 'out'
+
+steps:
+  - checkout: self
+    fetchDepth: 1
+
+  - task: AzureStaticWebApp@0
+    displayName: Build and deploy dashboard
+    inputs:
+      app_location: '$(APP_LOCATION)'
+      api_location: '$(API_LOCATION)'
+      output_location: '$(OUTPUT_LOCATION)'
+      azure_static_web_apps_api_token: '$(SWA_DASHBOARD_DEPLOYMENT_TOKEN)'
