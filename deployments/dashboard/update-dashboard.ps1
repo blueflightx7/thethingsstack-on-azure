@@ -172,7 +172,8 @@ try {
         # NOTE: do NOT pass positional <outputLocation> when using --output-location
         $deployCmd = "deploy --app-location ./ --output-location ./out --swa-config-location ./out --env production --deployment-token $DeploymentToken"
         if (-not [string]::IsNullOrWhiteSpace($ApiPath)) {
-            $deployCmd += " --api-location `"$ApiPath`""
+            # API is .NET; specify language/version so the CLI doesn't default to Node 16
+            $deployCmd += " --api-location `"$ApiPath`" --api-language dotnet --api-version 8"
         }
 
         # Force using npx to ensure we use the latest version of the CLI and avoid local version issues
