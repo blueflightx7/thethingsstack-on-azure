@@ -146,6 +146,14 @@ try {
         exit 1
     }
 
+    # Copy staticwebapp.config.json to out/ to ensure it's included in the deployment bundle
+    # This fixes routing issues where the config isn't picked up from the root
+    $configFile = Join-Path $DashboardPath 'staticwebapp.config.json'
+    if (Test-Path $configFile) {
+        Write-Host "   Copying staticwebapp.config.json to build output..." -ForegroundColor Gray
+        Copy-Item $configFile -Destination $outDir -Force
+    }
+
     # Deploy
     # We pass the token explicitly via flag to ensure it propagates correctly to npx/swa process
     
@@ -157,7 +165,8 @@ try {
     # Change to dashboard directory to simplify paths
     Push-Location $DashboardPath
     try {
-        $deployCmd = "deploy ./out --swa-config-location . --env production --deployment-token $DeploymentToken"
+        # Note: We copied staticwebapp.config.json into ./out, so we don't need --swa-config-location
+        $deployCmd = "deploy ./out --env production --deployment-token $DeploymentToken"
         if (-not [string]::IsNullOrWhiteSpace($ApiPath)) {
             $deployCmd += " --api-location `"$ApiPath`""
         }
