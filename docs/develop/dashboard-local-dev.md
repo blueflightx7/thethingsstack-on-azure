@@ -7,6 +7,34 @@ This project’s dashboard is a **Next.js static site** in [dashboard/](../../da
 - Node.js **20.x** recommended (18.x typically works, but 20.x is the safest default).
 - npm (ships with Node).
 
+### If `node`/`npm` are not recognized on Windows
+
+Sometimes Node.js is installed but not on your PATH. Run this once in PowerShell, then open a new shell:
+
+```powershell
+# Add Node.js folder to User PATH
+$nodePath = 'C:\Program Files\nodejs'
+$userPath = [Environment]::GetEnvironmentVariable('Path','User')
+if ($userPath -notlike "*$nodePath*") {
+  [Environment]::SetEnvironmentVariable('Path', $userPath + ";" + $nodePath, 'User')
+}
+
+# Add global npm bin path to User PATH
+$npmRoaming = "$env:APPDATA\npm"  # e.g., C:\Users\<you>\AppData\Roaming\npm
+$userPath = [Environment]::GetEnvironmentVariable('Path','User')
+if ($userPath -notlike "*$npmRoaming*") {
+  [Environment]::SetEnvironmentVariable('Path', $userPath + ";" + $npmRoaming, 'User')
+}
+
+# Reload this session's PATH
+$env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+            [System.Environment]::GetEnvironmentVariable('Path', 'User')
+
+# Test
+node -v
+npm -v
+```
+
 ### Windows
 
 - Install Node.js from: https://nodejs.org/
