@@ -165,8 +165,11 @@ try {
     # Change to dashboard directory to simplify paths
     Push-Location $DashboardPath
     try {
-        # Note: We copied staticwebapp.config.json into ./out, so we don't need --swa-config-location
-        $deployCmd = "deploy ./out --env production --deployment-token $DeploymentToken"
+        # Explicitly set app/output/config locations so the CLI picks up the exported site correctly
+        # app-location: source root (already built)
+        # output-location: ./out (Next.js export output)
+        # swa-config-location: ./out (we copied the config there)
+        $deployCmd = "deploy ./ --output-location ./out --swa-config-location ./out --env production --deployment-token $DeploymentToken"
         if (-not [string]::IsNullOrWhiteSpace($ApiPath)) {
             $deployCmd += " --api-location `"$ApiPath`""
         }
