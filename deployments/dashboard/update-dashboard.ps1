@@ -169,7 +169,8 @@ try {
         # app-location: source root (already built)
         # output-location: ./out (Next.js export output)
         # swa-config-location: ./out (we copied the config there)
-        $deployCmd = "deploy ./ --output-location ./out --swa-config-location ./out --env production --deployment-token $DeploymentToken"
+        # NOTE: do NOT pass positional <outputLocation> when using --output-location
+        $deployCmd = "deploy --app-location ./ --output-location ./out --swa-config-location ./out --env production --deployment-token $DeploymentToken"
         if (-not [string]::IsNullOrWhiteSpace($ApiPath)) {
             $deployCmd += " --api-location `"$ApiPath`""
         }
