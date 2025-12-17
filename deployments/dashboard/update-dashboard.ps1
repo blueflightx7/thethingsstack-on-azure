@@ -69,15 +69,6 @@ if (-not (Test-Path $packageJson)) {
     exit 1
 }
 
-# API Path
-$ApiPath = Join-Path $repoRoot 'deployments\dashboard\api'
-if (-not (Test-Path $ApiPath)) {
-    Write-Host "⚠️ API path not found: $ApiPath (Skipping API deployment)" -ForegroundColor Yellow
-    $ApiPath = ""
-} else {
-    Assert-Command -Name 'dotnet' -FailureMessage ".NET SDK not found. Install .NET 8 SDK to build the API."
-}
-
 # Handle hostname input (common user error)
 if ($StaticWebAppName -match '\.azurestaticapps\.net$') {
     Write-Host "⚠️  Input '$StaticWebAppName' looks like a hostname." -ForegroundColor Yellow
@@ -158,9 +149,6 @@ try {
     # We pass the token explicitly via flag to ensure it propagates correctly to npx/swa process
     
     Write-Host "Deploying to Static Web App (production environment)..." -ForegroundColor Yellow
-    if (-not [string]::IsNullOrWhiteSpace($ApiPath)) {
-        Write-Host "   Including API from: $ApiPath" -ForegroundColor Gray
-    }
 
     # Change to dashboard directory to simplify paths
     Push-Location $DashboardPath
@@ -171,10 +159,6 @@ try {
         # swa-config-location: ./out (we copied the config there)
         # NOTE: do NOT pass positional <outputLocation> when using --output-location
         $deployCmd = "deploy --app-location ./ --output-location ./out --swa-config-location ./out --env production --deployment-token $DeploymentToken"
-        if (-not [string]::IsNullOrWhiteSpace($ApiPath)) {
-            # API is .NET; specify language/version so the CLI doesn't default to Node 16
-            $deployCmd += " --api-location `"$ApiPath`" --api-language dotnet --api-version 8"
-        }
 
         # Force using npx to ensure we use the latest version of the CLI and avoid local version issues
         Write-Host "   Using 'npx @azure/static-web-apps-cli'..." -ForegroundColor Gray

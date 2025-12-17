@@ -129,3 +129,15 @@ What it does:
 
 If you need to run the script directly (advanced), it’s:
 - [deployments/dashboard/update-dashboard.ps1](../../deployments/dashboard/update-dashboard.ps1)
+
+## Deploy the dashboard API (/api)
+
+The dashboard API is deployed as a **separate Azure Function App** (BYO backend) and linked to the Static Web App.
+
+From repo root:
+
+```powershell
+\deploy.ps1 -Mode dashboard-api
+```
+
+This publishes the API and links it as the SWA `/api/*` backend (requires **Standard** SWA SKU).

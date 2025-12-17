@@ -6,7 +6,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet("", "vm", "aks", "quick", "monitoring", "integration", "dashboard", "dashboard-update")]
+    [ValidateSet("", "vm", "aks", "quick", "monitoring", "integration", "dashboard", "dashboard-update", "dashboard-api")]
     [string]$Mode = "",
     
     [Parameter(Mandatory=$false)]
@@ -86,6 +86,10 @@ function Show-DeploymentMenu {
     Write-Host "      • Builds dashboard/ and deploys to existing Static Web App" -ForegroundColor Gray
     Write-Host "      • Does NOT redeploy infrastructure`n" -ForegroundColor Gray
 
+    Write-Host "  [9] Deploy Dashboard API (BYO Functions)" -ForegroundColor White
+    Write-Host "      • Publishes deployments/dashboard/api to an existing Function App" -ForegroundColor Gray
+    Write-Host "      • Links Function App as SWA /api backend (Standard SKU required)`n" -ForegroundColor Gray
+
     Write-Host "  [Q] Quit`n" -ForegroundColor DarkGray
     
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
@@ -164,7 +168,7 @@ if ([string]::IsNullOrEmpty($Mode)) {
         
         Show-DeploymentMenu
         
-        $choice = Read-Host "Select deployment mode [1-8, Q]"
+        $choice = Read-Host "Select deployment mode [1-9, Q]"
         
         switch ($choice.ToUpper()) {
             "1" { 
@@ -196,6 +200,10 @@ if ([string]::IsNullOrEmpty($Mode)) {
             }
             "8" {
                 $Mode = "dashboard-update"
+                break
+            }
+            "9" {
+                $Mode = "dashboard-api"
                 break
             }
             "Q" {
@@ -750,10 +758,61 @@ SSH Source IP: $AdminSourceIP
 
         & $dashboardUpdateScript @params
     }
+
+    "dashboard-api" {
+        Write-Host "🧩 Starting Dashboard API Deployment (BYO Functions)..." -ForegroundColor Cyan
+        Write-Host "   Using: deployments/dashboard/deploy-dashboard-api.ps1`n" -ForegroundColor Gray
+
+        $dashboardApiScript = "$PSScriptRoot\deployments\dashboard\deploy-dashboard-api.ps1"
+        if (-not (Test-Path $dashboardApiScript)) {
+            Write-Host "❌ Error: Dashboard API deployment script not found" -ForegroundColor Red
+            Write-Host "   Expected: $dashboardApiScript`n" -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+        Write-Host "  DASHBOARD API (BYO FUNCTIONS)" -ForegroundColor Yellow
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
+
+        Write-Host "Enter the Resource Group name containing the Static Web App:" -ForegroundColor Cyan
+        $targetRg = Read-Host "Resource Group Name"
+        if ([string]::IsNullOrWhiteSpace($targetRg)) {
+            Write-Host "Resource Group Name is required." -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "Enter the Static Web App name:" -ForegroundColor Cyan
+        $targetSwa = Read-Host "Static Web App Name"
+        if ([string]::IsNullOrWhiteSpace($targetSwa)) {
+            Write-Host "Static Web App Name is required." -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "Enter the Function App name (existing, Windows/.NET 8):" -ForegroundColor Cyan
+        $targetFunc = Read-Host "Function App Name"
+        if ([string]::IsNullOrWhiteSpace($targetFunc)) {
+            Write-Host "Function App Name is required." -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "Enter the Function App Resource Group (press Enter if same as SWA RG):" -ForegroundColor Cyan
+        $funcRg = Read-Host "Function App Resource Group"
+
+        $params = @{
+            ResourceGroupName = $targetRg
+            StaticWebAppName = $targetSwa
+            FunctionAppName = $targetFunc
+        }
+        if (-not [string]::IsNullOrWhiteSpace($funcRg)) {
+            $params.FunctionAppResourceGroupName = $funcRg
+        }
+
+        & $dashboardApiScript @params
+    }
     
     default {
         Write-Host "❌ Invalid deployment mode: $Mode" -ForegroundColor Red
-        Write-Host "   Valid modes: quick, aks, vm, monitoring, integration, dashboard, dashboard-update" -ForegroundColor Yellow
+        Write-Host "   Valid modes: quick, aks, vm, monitoring, integration, dashboard, dashboard-update, dashboard-api" -ForegroundColor Yellow
         exit 1
     }
 }

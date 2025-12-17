@@ -9,7 +9,11 @@ This guide deploys the **Dashboard** resources:
 - Azure PowerShell (`Az`) and authenticated session (`Connect-AzAccount`)
 - Azure CLI (`az`) authenticated (`az login`)
 - Node.js 20+ and npm (for building the dashboard UI)
-- Azure Static Web Apps CLI (for pushing content): `npm i -g @azure/static-web-apps-cli`
+- (Optional) Azure Static Web Apps CLI (for pushing content): `npm i -g @azure/static-web-apps-cli`
+
+For the Dashboard API (BYO backend):
+- .NET SDK 8 (for building/publishing the Functions API)
+- An existing Azure Function App (Windows, .NET 8 isolated) that will host the API
 
 Note:
 - The UI-only update script ([deployments/dashboard/update-dashboard.ps1](../../deployments/dashboard/update-dashboard.ps1)) will fail fast if required dependencies (`az`, `node`, `npm`) are missing.
@@ -82,17 +86,35 @@ If deployment fails with "swa not found":
 - Install the CLI globally: `npm i -g @azure/static-web-apps-cli`
 - Or ensure `npx` is available on your PATH.
 
-### 2) Retrieve the SWA deployment token
+## Deploy the dashboard API (BYO Functions) and enable /api
 
-Use the Static Web App name printed by deployment:
+Azure Static Web Apps will only proxy `/api/*` if you link a backend.
+
+Requirements:
+- Your Static Web App must be **Standard** SKU (backend linking is not supported on Free).
+- You must already have a Function App created (the script publishes code; it does not provision the Function App).
+
+From repo root:
+
+```powershell
+.\deploy.ps1 -Mode dashboard-api
+```
+
+You will be prompted for:
+- Resource Group Name (where the SWA lives)
+- Static Web App Name
+- Function App Name
+- (Optional) Function App Resource Group
+
+On success, you can test:
+- `https://<your-swa-hostname>/api/overview`
+
+## Manual UI deploy (advanced)
+
+If you want to deploy without the PowerShell update script, you can still deploy the static output manually.
 
 ```bash
 az staticwebapp secrets list -n <static-web-app-name> -g <resource-group> --query properties.apiKey -o tsv
-```
-
-### 3) Push the content
-
-```bash
 swa deploy --app-location ./dashboard --output-location out --swa-config-location ./dashboard --env production --deployment-token <token>
 ```
 
@@ -111,6 +133,7 @@ This will:
 
 ## Notes
 
+- The UI update path is frontend-only. For `/api/*`, use the BYO Functions flow above.
 - Entra ID auth is expected to be enabled for the dashboard, but requires an App Registration and SWA auth configuration. This guide intentionally deploys the core resources first.
 - The Web PubSub endpoint is provisioned for realtime features; the current UI is a read-only shell with placeholders for Fabric RTI embedding and Digital Twins.
 - Azure Static Web Apps isn't available in every Azure region. If you deploy from an unsupported region (for example `eastus`), the template will deploy the Static Web App in a supported region (for example `eastus2`).
