@@ -171,19 +171,14 @@ try {
             $deployCmd += " --api-location `"$ApiPath`""
         }
 
-        if (Get-Command swa -ErrorAction SilentlyContinue) {
-            Write-Host "   Using local 'swa' CLI..." -ForegroundColor Gray
-            Invoke-Expression "swa $deployCmd" | Out-Host
-        }
-        else {
-            Write-Host "   Using 'npx @azure/static-web-apps-cli'..." -ForegroundColor Gray
-            Assert-Command -Name 'npx' -FailureMessage "npx not found on PATH."
-            
-            Invoke-Expression "npx -y @azure/static-web-apps-cli@latest $deployCmd" | Out-Host
+        # Force using npx to ensure we use the latest version of the CLI and avoid local version issues
+        Write-Host "   Using 'npx @azure/static-web-apps-cli'..." -ForegroundColor Gray
+        Assert-Command -Name 'npx' -FailureMessage "npx not found on PATH."
+        
+        Invoke-Expression "npx -y @azure/static-web-apps-cli@latest $deployCmd" | Out-Host
 
-            if ($LASTEXITCODE -ne 0) {
-                throw "SWA CLI deploy failed."
-            }
+        if ($LASTEXITCODE -ne 0) {
+            throw "SWA CLI deploy failed."
         }
     }
     finally {
