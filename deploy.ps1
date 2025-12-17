@@ -6,7 +6,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet("", "vm", "aks", "quick", "monitoring", "integration")]
+    [ValidateSet("", "vm", "aks", "quick", "monitoring", "integration", "dashboard", "dashboard-update")]
     [string]$Mode = "",
     
     [Parameter(Mandatory=$false)]
@@ -77,6 +77,14 @@ function Show-DeploymentMenu {
     Write-Host "      • Adds IoT Hub, SQL, Fabric Stream, & Archival" -ForegroundColor Gray
     Write-Host "      • Non-Enterprise compatible (Webhooks)" -ForegroundColor Gray
     Write-Host "      • Cost: +~$30-45/month`n" -ForegroundColor Gray
+
+    Write-Host "  [7] Deploy Dashboard (Website)" -ForegroundColor White
+    Write-Host "      • Static Web App + realtime endpoint (Web PubSub)" -ForegroundColor Gray
+    Write-Host "      • Includes Fabric RTI + Digital Twins placeholders`n" -ForegroundColor Gray
+
+    Write-Host "  [8] Update Dashboard UI (Deploy only)" -ForegroundColor White
+    Write-Host "      • Builds dashboard/ and deploys to existing Static Web App" -ForegroundColor Gray
+    Write-Host "      • Does NOT redeploy infrastructure`n" -ForegroundColor Gray
 
     Write-Host "  [Q] Quit`n" -ForegroundColor DarkGray
     
@@ -156,7 +164,7 @@ if ([string]::IsNullOrEmpty($Mode)) {
         
         Show-DeploymentMenu
         
-        $choice = Read-Host "Select deployment mode [1-5, Q]"
+        $choice = Read-Host "Select deployment mode [1-8, Q]"
         
         switch ($choice.ToUpper()) {
             "1" { 
@@ -180,6 +188,14 @@ if ([string]::IsNullOrEmpty($Mode)) {
             }
             "6" { 
                 $Mode = "integration"
+                break
+            }
+            "7" {
+                $Mode = "dashboard"
+                break
+            }
+            "8" {
+                $Mode = "dashboard-update"
                 break
             }
             "Q" {
@@ -628,10 +644,116 @@ SSH Source IP: $AdminSourceIP
         
         & $integrationScript @params
     }
+
+    "dashboard" {
+        Write-Host "🖥️  Starting Dashboard Deployment..." -ForegroundColor Cyan
+        Write-Host "   Using: deployments/dashboard/deploy-dashboard.ps1`n" -ForegroundColor Gray
+
+        $dashboardScript = "$PSScriptRoot\deployments\dashboard\deploy-dashboard.ps1"
+        if (-not (Test-Path $dashboardScript)) {
+            Write-Host "❌ Error: Dashboard deployment script not found" -ForegroundColor Red
+            Write-Host "   Expected: $dashboardScript`n" -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+        Write-Host "  DASHBOARD CONFIGURATION" -ForegroundColor Yellow
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
+
+        Write-Host "Enter the Resource Group name where the dashboard resources should be deployed:" -ForegroundColor Cyan
+        $targetRg = Read-Host "Resource Group Name"
+        if ([string]::IsNullOrWhiteSpace($targetRg)) {
+            Write-Host "Resource Group Name is required." -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "Detecting Resource Group region..." -ForegroundColor Gray
+        try {
+            $rgInfo = Get-AzResourceGroup -Name $targetRg -ErrorAction Stop
+            $targetLocation = $rgInfo.Location
+            Write-Host "✓ Using region: $targetLocation" -ForegroundColor Green
+        } catch {
+            Write-Host "❌ Error: Could not find Resource Group '$targetRg'" -ForegroundColor Red
+            Write-Host "   Please ensure you are logged in and the name is correct." -ForegroundColor Yellow
+            exit 1
+        }
+
+        # Prompt for SKU
+        Write-Host "`nSelect Static Web App SKU:" -ForegroundColor Cyan
+        Write-Host "  [1] Free (Hobby/Personal) - No SLA, limited bandwidth" -ForegroundColor White
+        Write-Host "  [2] Standard (Production) - SLA, custom domains, private endpoints" -ForegroundColor White
+        $skuSelection = Read-Host "Select SKU [1-2] (Default: 1)"
+        
+        $staticWebAppSku = switch ($skuSelection) {
+            '2' { 'Standard' }
+            Default { 'Free' }
+        }
+        Write-Host "✓ Selected SKU: $staticWebAppSku" -ForegroundColor Green
+
+        # Prompt for Name Prefix
+        Write-Host "`nEnter a resource name prefix (affects hostname):" -ForegroundColor Cyan
+        Write-Host "  Example: 'my-iot' -> 'my-iot-dash-xyz.azurestaticapps.net'" -ForegroundColor Gray
+        $prefixInput = Read-Host "Prefix (Default: tts)"
+        if ([string]::IsNullOrWhiteSpace($prefixInput)) {
+            $prefixInput = 'tts'
+        }
+        # Validate prefix (alphanumeric, hyphens, max 10 chars to be safe)
+        if ($prefixInput -notmatch '^[a-z0-9-]{1,15}$') {
+            Write-Host "❌ Invalid prefix. Use lowercase alphanumeric and hyphens only (max 15 chars)." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "✓ Using prefix: $prefixInput" -ForegroundColor Green
+
+        $params = @{
+            ResourceGroupName = $targetRg
+            Location = $targetLocation
+            StaticWebAppSku = $staticWebAppSku
+            NamePrefix = $prefixInput
+        }
+
+        & $dashboardScript @params
+    }
+
+    "dashboard-update" {
+        Write-Host "🖥️  Starting Dashboard UI Update (Deploy only)..." -ForegroundColor Cyan
+        Write-Host "   Using: deployments/dashboard/update-dashboard.ps1`n" -ForegroundColor Gray
+
+        $dashboardUpdateScript = "$PSScriptRoot\deployments\dashboard\update-dashboard.ps1"
+        if (-not (Test-Path $dashboardUpdateScript)) {
+            Write-Host "❌ Error: Dashboard UI update script not found" -ForegroundColor Red
+            Write-Host "   Expected: $dashboardUpdateScript`n" -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+        Write-Host "  DASHBOARD UI UPDATE" -ForegroundColor Yellow
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Yellow
+
+        Write-Host "Enter the Resource Group name containing the Static Web App:" -ForegroundColor Cyan
+        $targetRg = Read-Host "Resource Group Name"
+        if ([string]::IsNullOrWhiteSpace($targetRg)) {
+            Write-Host "Resource Group Name is required." -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "Enter the Static Web App name (from the dashboard deployment output):" -ForegroundColor Cyan
+        $targetSwa = Read-Host "Static Web App Name"
+        if ([string]::IsNullOrWhiteSpace($targetSwa)) {
+            Write-Host "Static Web App Name is required." -ForegroundColor Red
+            exit 1
+        }
+
+        $params = @{
+            ResourceGroupName = $targetRg
+            StaticWebAppName = $targetSwa
+        }
+
+        & $dashboardUpdateScript @params
+    }
     
     default {
         Write-Host "❌ Invalid deployment mode: $Mode" -ForegroundColor Red
-        Write-Host "   Valid modes: quick, aks, vm, monitoring, integration" -ForegroundColor Yellow
+        Write-Host "   Valid modes: quick, aks, vm, monitoring, integration, dashboard, dashboard-update" -ForegroundColor Yellow
         exit 1
     }
 }
