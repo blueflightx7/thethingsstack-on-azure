@@ -272,6 +272,13 @@ backups/
 # ====================
 # PROJECT-SPECIFIC EXCLUSIONS
 # ====================
+# Dashboard artifacts
+dashboard/out/
+dashboard/.next/
+dashboard/node_modules/
+dashboard/.env.local
+dashboard/.env.production
+
 # Legacy/test files that contain real secrets (from security audit)
 config/docker-compose.yml
 config/docker-compose-enhanced.yml

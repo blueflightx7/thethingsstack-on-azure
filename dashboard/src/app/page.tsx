@@ -1,57 +1,44 @@
-'use client'
+'use client';
 
-import {
-  Body1,
-  Caption1,
-  FluentProvider,
-  Subtitle1,
-  Title1,
-  webLightTheme,
-} from '@fluentui/react-components'
+import { DashboardHeader } from './components/DashboardHeader';
+import { OverviewCards } from './components/OverviewCards';
+import { RealtimeChart } from './components/RealtimeChart';
+import { ArchitectureDiagram } from './components/ArchitectureDiagram';
+import { makeStyles, shorthands } from '@griffel/react';
+
+const useStyles = makeStyles({
+  main: {
+    backgroundColor: '#faf9f8',
+    minHeight: '100vh',
+  },
+  content: {
+    maxWidth: '1200px',
+    margin: '0 auto',
+    ...shorthands.padding('20px'),
+  },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    ...shorthands.gap('20px'),
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+});
 
 export default function HomePage() {
-  const webPubSubHost = process.env.NEXT_PUBLIC_WEB_PUBSUB_HOST ?? '(not set)'
-  const webPubSubHub = process.env.NEXT_PUBLIC_WEB_PUBSUB_HUB ?? 'dashboard'
+  const styles = useStyles();
 
   return (
-    <FluentProvider theme={webLightTheme}>
-      <main>
-        <Title1>The Things Stack on Azure — Dashboard</Title1>
-        <Body1>
-          This site is a lightweight, read-only dashboard shell for architecture and future real-time views.
-        </Body1>
-
-        <section className="section">
-          <Subtitle1>Architecture overview</Subtitle1>
-          <Body1>
-            This deployment pairs a Static Web App for the UI with Azure Web PubSub for realtime events.
-          </Body1>
-          <dl className="kv">
-            <dt>Web PubSub host</dt>
-            <dd>{webPubSubHost}</dd>
-            <dt>Web PubSub hub</dt>
-            <dd>{webPubSubHub}</dd>
-          </dl>
-          <Caption1>
-            Note: NEXT_PUBLIC_* values are typically embedded at build time for a static export.
-          </Caption1>
-        </section>
-
-        <section className="section">
-          <Subtitle1>Fabric Real-Time Intelligence</Subtitle1>
-          <Body1>
-            Placeholder for an embedded Fabric RTI dashboard (e.g., an iframe embed) once an embed URL is available.
-          </Body1>
-          <Caption1>Embed wiring is intentionally deferred.</Caption1>
-        </section>
-
-        <section className="section">
-          <Subtitle1>Azure Digital Twins</Subtitle1>
-          <Body1>
-            Placeholder for future Digital Twins views (device/hive model, live state, and relationship graph).
-          </Body1>
-        </section>
-      </main>
-    </FluentProvider>
-  )
+    <div className={styles.main}>
+      <DashboardHeader />
+      <div className={styles.content}>
+        <OverviewCards />
+        <div className={styles.grid}>
+          <RealtimeChart />
+          <ArchitectureDiagram />
+        </div>
+      </div>
+    </div>
+  );
 }

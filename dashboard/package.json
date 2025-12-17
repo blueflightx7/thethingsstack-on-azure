@@ -4,13 +4,20 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "dev": "node node_modules/next/dist/bin/next dev",
+    "build": "node node_modules/next/dist/bin/next build",
+    "start": "node node_modules/next/dist/bin/next start",
+    "lint": "node node_modules/next/dist/bin/next lint"
   },
   "dependencies": {
-    "@fluentui/react-components": "^9.59.0",
+    "@fluentui/react-avatar": "^9.9.12",
+    "@fluentui/react-button": "^9.7.0",
+    "@fluentui/react-card": "^9.5.7",
+    "@fluentui/react-components": "^9.72.8",
+    "@fluentui/react-icons": "^2.0.316",
+    "@fluentui/react-image": "^9.3.11",
+    "@fluentui/react-text": "^9.6.11",
+    "@griffel/react": "^1.5.32",
     "next": "^14.2.20",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -19,8 +26,8 @@
     "@types/node": "^20.11.30",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "eslint": "^8.57.0",
-    "eslint-config-next": "^14.2.20",
+    "eslint": "^9.39.2",
+    "eslint-config-next": "^16.0.10",
     "typescript": "^5.6.3"
   }
 }

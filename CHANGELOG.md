@@ -28,6 +28,16 @@ All notable changes to this TTS deployment project are documented in this file.
 ### Added - Phase 2: CI/CD Pipelines & Script Consolidation
 
 **New Files**:
+- `azure-pipelines-dashboard.yml` - Azure DevOps pipeline for Dashboard
+- `deployments/dashboard/update-dashboard.ps1` - Dashboard UI deployment script
+
+**Dashboard Fixes (v2-web)**:
+- Fixed Fluent UI v9 import issues (split packages for Card, Icons)
+- Resolved NPM high-severity vulnerabilities
+- Fixed SWA deployment caching issues
+- Added region mapping for Static Web Apps (eastus -> eastus2)
+
+**New Files**:
 - `.azure-pipelines/tts-aks-deploy.yml` (300+ lines) - Azure DevOps pipeline
 - `.github/workflows/tts-aks-deploy.yml` (275+ lines) - GitHub Actions workflow
 
