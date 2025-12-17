@@ -8,19 +8,24 @@ import { makeStyles, shorthands } from '@griffel/react';
 
 const useStyles = makeStyles({
   main: {
-    backgroundColor: '#faf9f8',
+    backgroundColor: '#f8f8f8', // Slightly lighter gray
     minHeight: '100vh',
+    fontFamily: '"Segoe UI", "Segoe UI Web (West European)", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
   },
   content: {
-    maxWidth: '1200px',
+    maxWidth: '1400px', // Wider container
     margin: '0 auto',
-    ...shorthands.padding('20px'),
+    ...shorthands.padding('32px', '48px'),
+    '@media (max-width: 768px)': {
+      ...shorthands.padding('24px'),
+    },
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    ...shorthands.gap('20px'),
-    '@media (max-width: 768px)': {
+    gridTemplateColumns: '2fr 1fr', // Give chart more space
+    ...shorthands.gap('24px'),
+    marginTop: '24px',
+    '@media (max-width: 1024px)': {
       gridTemplateColumns: '1fr',
     },
   },

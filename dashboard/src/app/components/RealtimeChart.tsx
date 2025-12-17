@@ -15,17 +15,30 @@ import {
 
 const useStyles = makeStyles({
   card: {
-    ...shorthands.margin('20px'),
+    ...shorthands.margin('24px', '0'),
     height: '400px',
+    ...shorthands.borderRadius('12px'),
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)',
+    border: '1px solid #f0f0f0',
+  },
+  header: {
+    ...shorthands.padding('20px', '24px'),
+    borderBottom: '1px solid #f0f0f0',
   },
   placeholder: {
     display: 'flex',
+    flexDirection: 'column',
     justifyContent: 'center',
     alignItems: 'center',
     height: '100%',
-    backgroundColor: '#f5f5f5',
-    color: '#666',
+    backgroundColor: '#fafafa',
+    color: '#605e5c',
+    ...shorthands.gap('16px'),
   },
+  chartIcon: {
+    fontSize: '48px',
+    color: '#d0d0d0',
+  }
 });
 
 export const RealtimeChart = () => {
@@ -33,9 +46,16 @@ export const RealtimeChart = () => {
 
   return (
     <Card className={styles.card}>
-      <CardHeader header={<Title3>Realtime Message Ingestion (Web PubSub)</Title3>} />
+      <div className={styles.header}>
+        <Title3>Realtime Message Ingestion</Title3>
+        <Text style={{ display: 'block', color: '#605e5c', fontSize: '12px', marginTop: '4px' }}>
+          Live data stream via Azure Web PubSub
+        </Text>
+      </div>
       <div className={styles.placeholder}>
-        <Text size={500}>Realtime Chart Placeholder (Waiting for Web PubSub connection...)</Text>
+        <div className={styles.chartIcon}>📊</div>
+        <Text size={400} weight="medium">Waiting for live data stream...</Text>
+        <Text size={200}>Connects to Azure Web PubSub service</Text>
       </div>
     </Card>
   );
