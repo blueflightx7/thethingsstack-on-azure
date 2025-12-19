@@ -47,6 +47,10 @@
 //
 // ==============================================================================
 
+// Functions v4 C# script does not implicitly include Newtonsoft.Json.
+// Explicitly reference the NuGet package so JObject/JsonConvert compile.
+#r "Newtonsoft.Json"
+
 using System.Net;
 using System.Net.Http;
 using System.Text;
