@@ -88,6 +88,10 @@ thethingsstack-on-azure.parameters.json
 **/bicep-build/
 **/arm-templates/
 
+# Azure Functions (integration) - generated dependencies (do not commit)
+deployments/integration/function/bin/
+deployments/integration/function/.deps_publish/
+
 # Terraform state files (if ever used)
 *.tfstate
 *.tfstate.*

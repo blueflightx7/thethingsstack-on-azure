@@ -194,12 +194,24 @@ try {
     Write-Host "Deploying Function Code..." -ForegroundColor Yellow
     $funcDir = "$PSScriptRoot\function"
     $zipPath = "$PSScriptRoot\function.zip"
+
+    # Prepare root-level dependencies for C# script functions (e.g., Microsoft.Data.SqlClient)
+    $prepDeps = Join-Path $funcDir 'prepare-deps.ps1'
+    if (Test-Path $prepDeps) {
+        Write-Host "Preparing Function dependencies..." -ForegroundColor Gray
+        & $prepDeps
+    }
     
     if (Test-Path $zipPath) { Remove-Item $zipPath }
     Compress-Archive -Path "$funcDir\*" -DestinationPath $zipPath
     
     az functionapp deployment source config-zip --resource-group $ResourceGroupName --name $functionAppName --src $zipPath
     Remove-Item $zipPath
+
+    # Ensure triggers/routes are registered after deployment
+    Write-Host "Restarting Function App and syncing triggers..." -ForegroundColor Gray
+    az functionapp restart --resource-group $ResourceGroupName --name $functionAppName | Out-Null
+    az functionapp sync-function-triggers --resource-group $ResourceGroupName --name $functionAppName | Out-Null
 
     # Retrieve a Function key for header-based webhook auth (x-functions-key)
     # NOTE: We intentionally do NOT append ?code= to the URL because the target environment requires header auth.

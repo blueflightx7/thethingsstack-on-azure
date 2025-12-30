@@ -38,16 +38,16 @@
 //
 // ==============================================================================
 
-// Functions v4 C# script does not implicitly include Newtonsoft.Json.
-// Explicitly reference the NuGet package so JObject/JsonConvert compile.
-#r "nuget: Microsoft.Data.SqlClient, 5.1.5"
+// Functions v4 C# script does not implicitly include some assemblies.
+// Load Microsoft.Data.SqlClient from the root bin folder (added during packaging).
+#r "../bin/Microsoft.Data.SqlClient.dll"
 #r "Newtonsoft.Json"
 
 using System;
 using System.Data;
-using Microsoft.Data.SqlClient;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
