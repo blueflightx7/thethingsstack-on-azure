@@ -67,6 +67,17 @@ BEGIN
     CREATE INDEX IX_Devices_DevEUI ON Devices(DevEUI);
 END
 
+-- Additive columns for device↔hive identity correlation
+IF COL_LENGTH('Devices', 'HiveIdentity') IS NULL
+BEGIN
+    ALTER TABLE Devices ADD HiveIdentity UNIQUEIDENTIFIER NULL;
+END
+
+IF COL_LENGTH('Devices', 'HiveName') IS NULL
+BEGIN
+    ALTER TABLE Devices ADD HiveName NVARCHAR(255) NULL;
+END
+
 -- 2. Hives Table
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Hives')
 BEGIN
@@ -77,6 +88,43 @@ BEGIN
         HiveType NVARCHAR(50),
         OwnerID INT,
         CreatedAt DATETIME2 DEFAULT GETDATE()
+    );
+END
+
+-- 2b. Gateways & Hive↔Gateway mapping
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Gateways')
+BEGIN
+    CREATE TABLE Gateways (
+        GatewayID INT IDENTITY(1,1) PRIMARY KEY,
+        GatewayIdentifier NVARCHAR(255) NOT NULL UNIQUE,
+        LastSeen DATETIME2 NULL,
+        CreatedAt DATETIME2 DEFAULT GETUTCDATE()
+    );
+END
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'HiveGateways')
+BEGIN
+    CREATE TABLE HiveGateways (
+        HiveID INT NOT NULL,
+        GatewayID INT NOT NULL,
+        FirstSeen DATETIME2 DEFAULT GETUTCDATE(),
+        LastSeen DATETIME2 NULL,
+        PRIMARY KEY (HiveID, GatewayID),
+        FOREIGN KEY (HiveID) REFERENCES Hives(HiveID),
+        FOREIGN KEY (GatewayID) REFERENCES Gateways(GatewayID)
+    );
+END
+
+-- Preferred mapping: deterministic HiveIdentity (GUID) -> Gateways
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'HiveIdentityGateways')
+BEGIN
+    CREATE TABLE HiveIdentityGateways (
+        HiveIdentity UNIQUEIDENTIFIER NOT NULL,
+        GatewayID INT NOT NULL,
+        FirstSeen DATETIME2 DEFAULT GETUTCDATE(),
+        LastSeen DATETIME2 NULL,
+        PRIMARY KEY (HiveIdentity, GatewayID),
+        FOREIGN KEY (GatewayID) REFERENCES Gateways(GatewayID)
     );
 END
 
@@ -116,12 +164,47 @@ BEGIN
         SNR DECIMAL(5,2),               -- signal-to-noise ratio
         
         -- Raw Payload for debugging and re-ingestion
-        RawPayload NVARCHAR(MAX)
+        RawPayload NVARCHAR(MAX),
+        GatewayID INT NULL,
+        CorrelationId NVARCHAR(512) NULL
     );
     
     -- Clustered Index on Timestamp for TimeSeries performance
     CREATE INDEX IX_Measurements_Timestamp ON Measurements(Timestamp);
     CREATE INDEX IX_Measurements_DeviceID ON Measurements(DeviceID);
+END
+
+-- Additive columns for measurements (safe on existing deployments)
+IF COL_LENGTH('Measurements', 'GatewayID') IS NULL
+BEGIN
+    ALTER TABLE Measurements ADD GatewayID INT NULL;
+END
+
+IF COL_LENGTH('Measurements', 'CorrelationId') IS NULL
+BEGIN
+    ALTER TABLE Measurements ADD CorrelationId NVARCHAR(512) NULL;
+END
+
+-- FK: Measurements.GatewayID -> Gateways.GatewayID
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_Measurements_GatewayID')
+BEGIN
+    EXEC(N'ALTER TABLE Measurements
+    ADD CONSTRAINT FK_Measurements_GatewayID
+    FOREIGN KEY (GatewayID) REFERENCES Gateways(GatewayID);');
+END
+
+-- Dedupe by correlation id when available
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_Measurements_CorrelationId_Unique'
+      AND object_id = OBJECT_ID('Measurements')
+)
+BEGIN
+    -- Use dynamic SQL so this works even when CorrelationId is added earlier in the same script run.
+    EXEC(N'CREATE UNIQUE INDEX IX_Measurements_CorrelationId_Unique
+    ON Measurements(CorrelationId)
+    WHERE CorrelationId IS NOT NULL;');
 END
 
 -- 4. Alerts Table

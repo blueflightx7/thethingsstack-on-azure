@@ -41,18 +41,30 @@
 // Functions v4 C# script does not implicitly include some assemblies.
 // Load Microsoft.Data.SqlClient from the root bin folder (added during packaging).
 #r "../bin/Microsoft.Data.SqlClient.dll"
+#r "../bin/Azure.Core.dll"
+#r "../bin/Azure.Storage.Common.dll"
+#r "../bin/Azure.Storage.Blobs.dll"
+#r "../bin/System.Memory.Data.dll"
 #r "Newtonsoft.Json"
 
 using System;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
 using System.Data;
 using System.Text;
 using System.Threading.Tasks;
+using Azure.Storage.Blobs;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 private static string sqlConnectionString = Environment.GetEnvironmentVariable("SqlConnectionString");
+private static string storageConnectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+
+// Stable namespace UUID for deterministic HiveIdentity derivation.
+private static readonly Guid HiveIdentityNamespace = new Guid("2c52f8d7-0d12-4d7d-8f18-6dcd7bd7f9a2");
 
 public static async Task Run(string[] eventHubMessages, ILogger log)
 {
@@ -64,8 +76,21 @@ public static async Task Run(string[] eventHubMessages, ILogger log)
         return;
     }
 
+    if (string.IsNullOrWhiteSpace(storageConnectionString))
+    {
+        log.LogError("AzureWebJobsStorage is missing - cannot write payloads to Blob Storage");
+        return;
+    }
+
     int successCount = 0;
     int errorCount = 0;
+    int duplicateCount = 0;
+
+    var blobServiceClient = new BlobServiceClient(storageConnectionString);
+    var rawContainerClient = blobServiceClient.GetBlobContainerClient("raw-telemetry");
+    var processedContainerClient = blobServiceClient.GetBlobContainerClient("processed-data");
+    await rawContainerClient.CreateIfNotExistsAsync();
+    await processedContainerClient.CreateIfNotExistsAsync();
 
     using (var connection = new SqlConnection(sqlConnectionString))
     {
@@ -77,26 +102,33 @@ public static async Task Run(string[] eventHubMessages, ILogger log)
             {
                 JObject ttsPayload = JObject.Parse(message);
 
-                // Extract device identity
+                // Only process uplink messages (beehive sensor telemetry).
+                // Other message types (join/location) may not have decoded payloads and can cause NULL identity values.
+                var uplinkMessage = ttsPayload.SelectToken("uplink_message");
+                if (uplinkMessage == null)
+                {
+                    string nonUplinkDeviceId = ttsPayload.SelectToken("end_device_ids.device_id")?.ToString();
+                    log.LogInformation($"Skipping non-uplink message for device {nonUplinkDeviceId}");
+                    continue;
+                }
+
+                // Extract device identity (TTS schema)
                 string deviceId = ttsPayload.SelectToken("end_device_ids.device_id")?.ToString();
                 string devEui = ttsPayload.SelectToken("end_device_ids.dev_eui")?.ToString();
                 string applicationId = ttsPayload.SelectToken("end_device_ids.application_ids.application_id")?.ToString();
-                
+
                 if (string.IsNullOrEmpty(deviceId))
                 {
-                    log.LogWarning("Skipping message: device_id not found");
+                    log.LogWarning("Skipping uplink: device_id not found");
                     errorCount++;
                     continue;
                 }
 
-                // Upsert device record
-                int dbDeviceId = await UpsertDeviceAsync(connection, deviceId, devEui, applicationId, log);
-
-                // Extract uplink message
-                var uplinkMessage = ttsPayload.SelectToken("uplink_message");
-                if (uplinkMessage == null)
+                if (string.IsNullOrEmpty(devEui))
                 {
-                    log.LogInformation($"Skipping non-uplink message for device {deviceId}");
+                    // DevEUI is required by current SQL schema (Devices.DevEUI NOT NULL)
+                    log.LogWarning($"Skipping uplink for device {deviceId}: dev_eui not found in payload");
+                    errorCount++;
                     continue;
                 }
 
@@ -107,6 +139,13 @@ public static async Task Run(string[] eventHubMessages, ILogger log)
                     log.LogWarning($"No decoded_payload for device {deviceId}");
                     errorCount++;
                     continue;
+                }
+
+                // Correlation id for dedupe + filenames
+                string correlationId = ttsPayload.SelectToken("correlation_ids[0]")?.ToString();
+                if (string.IsNullOrWhiteSpace(correlationId))
+                {
+                    correlationId = "computed:" + ComputeSha256Hex(message);
                 }
 
                 // Extract timestamp
@@ -135,25 +174,88 @@ public static async Task Run(string[] eventHubMessages, ILogger log)
 
                 // Extract location from gateway metadata
                 var rxMetadata = uplinkMessage.SelectToken("rx_metadata[0]");
+                string gatewayId = rxMetadata?.SelectToken("gateway_ids.gateway_id")?.ToString();
                 decimal? latitude = GetDecimalValue(rxMetadata, "location.latitude");
                 decimal? longitude = GetDecimalValue(rxMetadata, "location.longitude");
                 int? rssi = GetIntValue(rxMetadata, "rssi");
                 decimal? snr = GetDecimalValue(rxMetadata, "snr");
 
-                // Insert measurement
-                await InsertMeasurementAsync(
-                    connection, 
-                    dbDeviceId, 
-                    timestamp, 
-                    tempInner, 
-                    batteryVoltage, 
-                    batteryPercent, 
-                    weightValue,
-                    fftBin71_122, fftBin122_173, fftBin173_224, fftBin224_276,
-                    fftBin276_327, fftBin327_378, fftBin378_429, fftBin429_480,
-                    fftBin480_532, fftBin532_583,
-                    latitude, longitude, rssi, snr,
-                    message, // Store raw JSON
+                // Deterministic hive identity derived from device identity
+                Guid hiveIdentity = CreateDeterministicGuid(HiveIdentityNamespace, deviceId);
+                string hiveName = deviceId;
+
+                // Upsert device record (only after we know this is a valid uplink with required identity)
+                int dbDeviceId = await UpsertDeviceAsync(connection, deviceId, devEui, applicationId, hiveIdentity, hiveName, log);
+
+                int? dbGatewayId = null;
+                if (!string.IsNullOrWhiteSpace(gatewayId))
+                {
+                    dbGatewayId = await UpsertGatewayAsync(connection, gatewayId, timestamp, log);
+                    await UpsertHiveIdentityGatewayAsync(connection, hiveIdentity, dbGatewayId.Value, timestamp, log);
+                }
+
+                // Store both raw and normalized payload for downstream use.
+                var cleanedPayload = new JObject
+                {
+                    ["device_id"] = deviceId,
+                    ["dev_eui"] = devEui,
+                    ["application_id"] = applicationId,
+                    ["received_at"] = timestamp,
+                    ["correlation_id"] = correlationId,
+                    ["hive_identity"] = hiveIdentity.ToString("D"),
+                    ["hive_name"] = hiveName,
+                    ["decoded_payload"] = decodedPayload,
+                    ["gateway_id"] = gatewayId,
+                    ["rssi"] = rssi,
+                    ["snr"] = snr,
+                    ["latitude"] = latitude,
+                    ["longitude"] = longitude
+                };
+
+                string storedPayload = JsonConvert.SerializeObject(new
+                {
+                    raw = ttsPayload,
+                    cleaned = cleanedPayload
+                });
+
+                // Insert measurement (dedupe enforced by unique CorrelationId index)
+                try
+                {
+                    await InsertMeasurementAsync(
+                        connection,
+                        dbDeviceId,
+                        timestamp,
+                        tempInner,
+                        batteryVoltage,
+                        batteryPercent,
+                        weightValue,
+                        fftBin71_122, fftBin122_173, fftBin173_224, fftBin224_276,
+                        fftBin276_327, fftBin327_378, fftBin378_429, fftBin429_480,
+                        fftBin480_532, fftBin532_583,
+                        latitude, longitude, rssi, snr,
+                        storedPayload,
+                        dbGatewayId,
+                        correlationId,
+                        log
+                    );
+                }
+                catch (SqlException ex) when (ex.Number == 2601 || ex.Number == 2627)
+                {
+                    duplicateCount++;
+                    log.LogInformation($"Duplicate correlation id - skipping. device={deviceId}, correlationId={correlationId}");
+                    continue;
+                }
+
+                // Archive raw + cleaned payloads to Blob Storage
+                await WritePayloadBlobsAsync(
+                    rawContainerClient,
+                    processedContainerClient,
+                    gatewayId,
+                    timestamp,
+                    deviceId,
+                    correlationId,
+                    ttsPayload,
+                    cleanedPayload,
                     log
                 );
 
@@ -167,21 +269,21 @@ public static async Task Run(string[] eventHubMessages, ILogger log)
         }
     }
 
-    log.LogInformation($"Processed {successCount} messages successfully, {errorCount} errors");
+    log.LogInformation($"Processed {successCount} messages successfully, {duplicateCount} duplicates skipped, {errorCount} errors");
 }
 
 // Upsert device record (insert if not exists, update LastSeenAt)
-private static async Task<int> UpsertDeviceAsync(SqlConnection connection, string deviceId, string devEui, string applicationId, ILogger log)
+private static async Task<int> UpsertDeviceAsync(SqlConnection connection, string deviceId, string devEui, string applicationId, Guid hiveIdentity, string hiveName, ILogger log)
 {
     string query = @"
         MERGE INTO Devices AS target
-        USING (SELECT @DevEUI AS DevEUI, @DeviceId AS HardwareID, @ApplicationId AS ApplicationID) AS source
+        USING (SELECT @DevEUI AS DevEUI, @DeviceId AS HardwareID, @ApplicationId AS ApplicationID, @HiveIdentity AS HiveIdentity, @HiveName AS HiveName) AS source
         ON target.DevEUI = source.DevEUI
         WHEN MATCHED THEN
-            UPDATE SET LastSeenAt = GETUTCDATE(), HardwareID = @DeviceId, ApplicationID = @ApplicationId
+            UPDATE SET LastSeenAt = GETUTCDATE(), HardwareID = @DeviceId, ApplicationID = @ApplicationId, HiveIdentity = @HiveIdentity, HiveName = @HiveName
         WHEN NOT MATCHED THEN
-            INSERT (DevEUI, HardwareID, Name, ApplicationID, CreatedAt, LastSeenAt)
-            VALUES (@DevEUI, @DeviceId, @DeviceId, @ApplicationId, GETUTCDATE(), GETUTCDATE());
+            INSERT (DevEUI, HardwareID, Name, ApplicationID, HiveIdentity, HiveName, CreatedAt, LastSeenAt)
+            VALUES (@DevEUI, @DeviceId, @DeviceId, @ApplicationId, @HiveIdentity, @HiveName, GETUTCDATE(), GETUTCDATE());
 
         SELECT DeviceID FROM Devices WHERE DevEUI = @DevEUI;
     ";
@@ -191,9 +293,57 @@ private static async Task<int> UpsertDeviceAsync(SqlConnection connection, strin
         command.Parameters.AddWithValue("@DevEUI", devEui ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@DeviceId", deviceId);
         command.Parameters.AddWithValue("@ApplicationId", applicationId ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("@HiveIdentity", hiveIdentity);
+        command.Parameters.AddWithValue("@HiveName", hiveName ?? (object)DBNull.Value);
 
         var result = await command.ExecuteScalarAsync();
         return Convert.ToInt32(result);
+    }
+}
+
+private static async Task<int> UpsertGatewayAsync(SqlConnection connection, string gatewayId, DateTime lastSeenAt, ILogger log)
+{
+    string query = @"
+        MERGE INTO Gateways AS target
+        USING (SELECT @GatewayIdentifier AS GatewayIdentifier) AS source
+        ON target.GatewayIdentifier = source.GatewayIdentifier
+        WHEN MATCHED THEN
+            UPDATE SET LastSeen = @LastSeen
+        WHEN NOT MATCHED THEN
+            INSERT (GatewayIdentifier, LastSeen, CreatedAt)
+            VALUES (@GatewayIdentifier, @LastSeen, GETUTCDATE());
+
+        SELECT GatewayID FROM Gateways WHERE GatewayIdentifier = @GatewayIdentifier;
+    ";
+
+    using (var command = new SqlCommand(query, connection))
+    {
+        command.Parameters.AddWithValue("@GatewayIdentifier", gatewayId);
+        command.Parameters.AddWithValue("@LastSeen", lastSeenAt);
+        var result = await command.ExecuteScalarAsync();
+        return Convert.ToInt32(result);
+    }
+}
+
+private static async Task UpsertHiveIdentityGatewayAsync(SqlConnection connection, Guid hiveIdentity, int gatewayDbId, DateTime seenAt, ILogger log)
+{
+    string query = @"
+        MERGE INTO HiveIdentityGateways AS target
+        USING (SELECT @HiveIdentity AS HiveIdentity, @GatewayID AS GatewayID) AS source
+        ON target.HiveIdentity = source.HiveIdentity AND target.GatewayID = source.GatewayID
+        WHEN MATCHED THEN
+            UPDATE SET LastSeen = @SeenAt
+        WHEN NOT MATCHED THEN
+            INSERT (HiveIdentity, GatewayID, FirstSeen, LastSeen)
+            VALUES (@HiveIdentity, @GatewayID, @SeenAt, @SeenAt);
+    ";
+
+    using (var command = new SqlCommand(query, connection))
+    {
+        command.Parameters.AddWithValue("@HiveIdentity", hiveIdentity);
+        command.Parameters.AddWithValue("@GatewayID", gatewayDbId);
+        command.Parameters.AddWithValue("@SeenAt", seenAt);
+        await command.ExecuteNonQueryAsync();
     }
 }
 
@@ -211,6 +361,8 @@ private static async Task InsertMeasurementAsync(
     int? fftBin480_532, int? fftBin532_583,
     decimal? latitude, decimal? longitude, int? rssi, decimal? snr,
     string rawPayload,
+    int? gatewayDbId,
+    string correlationId,
     ILogger log)
 {
     string query = @"
@@ -218,13 +370,15 @@ private static async Task InsertMeasurementAsync(
             DeviceID, Timestamp, Temperature_Inner, BatteryVoltage, BatteryPercent, 
             Weight_KG, FFT_Bin_71_122, FFT_Bin_122_173, FFT_Bin_173_224, FFT_Bin_224_276,
             FFT_Bin_276_327, FFT_Bin_327_378, FFT_Bin_378_429, FFT_Bin_429_480,
-            FFT_Bin_480_532, FFT_Bin_532_583, Latitude, Longitude, RSSI, SNR, RawPayload
+            FFT_Bin_480_532, FFT_Bin_532_583, Latitude, Longitude, RSSI, SNR, RawPayload,
+            GatewayID, CorrelationId
         )
         VALUES (
             @DeviceID, @Timestamp, @Temperature_Inner, @BatteryVoltage, @BatteryPercent,
             @Weight_KG, @FFT_Bin_71_122, @FFT_Bin_122_173, @FFT_Bin_173_224, @FFT_Bin_224_276,
             @FFT_Bin_276_327, @FFT_Bin_327_378, @FFT_Bin_378_429, @FFT_Bin_429_480,
-            @FFT_Bin_480_532, @FFT_Bin_532_583, @Latitude, @Longitude, @RSSI, @SNR, @RawPayload
+            @FFT_Bin_480_532, @FFT_Bin_532_583, @Latitude, @Longitude, @RSSI, @SNR, @RawPayload,
+            @GatewayID, @CorrelationId
         )
     ";
 
@@ -253,9 +407,114 @@ private static async Task InsertMeasurementAsync(
         command.Parameters.AddWithValue("@RSSI", rssi ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@SNR", snr ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@RawPayload", rawPayload);
+        command.Parameters.AddWithValue("@GatewayID", gatewayDbId.HasValue ? (object)gatewayDbId.Value : DBNull.Value);
+        command.Parameters.AddWithValue("@CorrelationId", correlationId ?? (object)DBNull.Value);
 
         await command.ExecuteNonQueryAsync();
     }
+}
+
+private static async Task WritePayloadBlobsAsync(
+    BlobContainerClient rawContainer,
+    BlobContainerClient processedContainer,
+    string gatewayId,
+    DateTime timestamp,
+    string deviceId,
+    string correlationId,
+    JObject rawPayload,
+    JObject cleanedPayload,
+    ILogger log)
+{
+    string gatewaySegment = SanitizePathSegment(string.IsNullOrWhiteSpace(gatewayId) ? "unknown-gateway" : gatewayId);
+    string dateSegment = timestamp.ToUniversalTime().ToString("yyyyMMdd");
+    string deviceSegment = SanitizePathSegment(deviceId);
+    string tsSegment = timestamp.ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ");
+    string correlationSegment = SanitizeFileComponent(correlationId, 200);
+    string baseName = $"{tsSegment}__{deviceSegment}__{correlationSegment}";
+
+    string rawBlobName = $"{gatewaySegment}/{dateSegment}/{deviceSegment}/{baseName}.raw.json";
+    string cleanedBlobName = $"{gatewaySegment}/{dateSegment}/{deviceSegment}/{baseName}.cleaned.json";
+
+    var rawClient = rawContainer.GetBlobClient(rawBlobName);
+    var cleanedClient = processedContainer.GetBlobClient(cleanedBlobName);
+
+    await rawClient.UploadAsync(BinaryData.FromString(rawPayload.ToString(Formatting.None)), overwrite: false);
+    await cleanedClient.UploadAsync(BinaryData.FromString(cleanedPayload.ToString(Formatting.None)), overwrite: false);
+}
+
+private static string SanitizePathSegment(string value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return "unknown";
+    var cleaned = new string(value.Select(ch =>
+        (char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' || ch == '.') ? ch : '_'
+    ).ToArray());
+    return cleaned.Trim('_');
+}
+
+private static string SanitizeFileComponent(string value, int maxLength)
+{
+    var cleaned = SanitizePathSegment(value);
+    if (string.IsNullOrWhiteSpace(cleaned)) cleaned = "unknown";
+    if (cleaned.Length > maxLength) cleaned = cleaned.Substring(0, maxLength);
+    return cleaned;
+}
+
+private static string ComputeSha256Hex(string text)
+{
+    using (var sha = SHA256.Create())
+    {
+        var bytes = Encoding.UTF8.GetBytes(text ?? string.Empty);
+        var hash = sha.ComputeHash(bytes);
+        var sb = new StringBuilder(hash.Length * 2);
+        foreach (var b in hash)
+        {
+            sb.Append(b.ToString("x2"));
+        }
+        return sb.ToString();
+    }
+}
+
+// Name-based deterministic GUID (RFC 4122 style: SHA1 over namespace + name; sets version 5 bits)
+private static Guid CreateDeterministicGuid(Guid namespaceId, string name)
+{
+    if (name == null) name = string.Empty;
+
+    byte[] namespaceBytes = namespaceId.ToByteArray();
+    SwapGuidByteOrder(namespaceBytes);
+
+    byte[] nameBytes = Encoding.UTF8.GetBytes(name);
+
+    byte[] hash;
+    using (var sha1 = SHA1.Create())
+    {
+        sha1.TransformBlock(namespaceBytes, 0, namespaceBytes.Length, null, 0);
+        sha1.TransformFinalBlock(nameBytes, 0, nameBytes.Length);
+        hash = sha1.Hash;
+    }
+
+    var newGuid = new byte[16];
+    Array.Copy(hash, 0, newGuid, 0, 16);
+
+    newGuid[6] = (byte)((newGuid[6] & 0x0F) | (5 << 4));
+    newGuid[8] = (byte)((newGuid[8] & 0x3F) | 0x80);
+
+    SwapGuidByteOrder(newGuid);
+    return new Guid(newGuid);
+}
+
+private static void SwapGuidByteOrder(byte[] guid)
+{
+    Swap(guid, 0, 3);
+    Swap(guid, 1, 2);
+    Swap(guid, 4, 5);
+    Swap(guid, 6, 7);
+}
+
+private static void Swap(byte[] buffer, int left, int right)
+{
+    byte temp = buffer[left];
+    buffer[left] = buffer[right];
+    buffer[right] = temp;
 }
 
 // Helper methods to safely extract values from JSON

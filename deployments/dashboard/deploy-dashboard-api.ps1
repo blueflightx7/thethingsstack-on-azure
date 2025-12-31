@@ -21,6 +21,25 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$BackendName = ""
+
+    ,
+    [Parameter(Mandatory = $false)]
+    [string]$KeyVaultName = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$SqlConnectionSecretName = "integration-sql-connection",
+
+    [Parameter(Mandatory = $false)]
+    [string]$SqlConnectionString = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$WebPubSubName = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$WebPubSubResourceGroupName = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$WebPubSubConnectionString = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,6 +82,10 @@ if ([string]::IsNullOrWhiteSpace($ApiProjectPath)) {
 
 if ([string]::IsNullOrWhiteSpace($BackendName)) {
     $BackendName = $FunctionAppName
+}
+
+if ([string]::IsNullOrWhiteSpace($WebPubSubResourceGroupName)) {
+    $WebPubSubResourceGroupName = $ResourceGroupName
 }
 
 # Basic tool checks
@@ -141,6 +164,40 @@ az functionapp deployment source config-zip -g $FunctionAppResourceGroupName -n 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ ZIP deploy failed." -ForegroundColor Red
     exit 1
+}
+
+# Optional: Configure app settings
+Write-Host "Configuring Function App settings (optional)..." -ForegroundColor Yellow
+
+if ([string]::IsNullOrWhiteSpace($SqlConnectionString) -and -not [string]::IsNullOrWhiteSpace($KeyVaultName)) {
+    Write-Host "Retrieving SQL connection string from Key Vault secret '$SqlConnectionSecretName'..." -ForegroundColor Gray
+    $SqlConnectionString = az keyvault secret show --vault-name $KeyVaultName --name $SqlConnectionSecretName --query value -o tsv --only-show-errors 2>$null
+}
+
+if ([string]::IsNullOrWhiteSpace($WebPubSubConnectionString) -and -not [string]::IsNullOrWhiteSpace($WebPubSubName)) {
+    Write-Host "Retrieving Web PubSub connection string for '$WebPubSubName'..." -ForegroundColor Gray
+    # Ensure the CLI extension exists (non-fatal if already installed)
+    $null = az extension add --name webpubsub --only-show-errors 2>$null
+    $WebPubSubConnectionString = az webpubsub key show -n $WebPubSubName -g $WebPubSubResourceGroupName --query primaryConnectionString -o tsv --only-show-errors 2>$null
+}
+
+$settings = @()
+if (-not [string]::IsNullOrWhiteSpace($SqlConnectionString)) {
+    $settings += "SqlConnectionString=$SqlConnectionString"
+}
+if (-not [string]::IsNullOrWhiteSpace($WebPubSubConnectionString)) {
+    $settings += "WebPubSubConnectionString=$WebPubSubConnectionString"
+}
+
+if ($settings.Count -gt 0) {
+    Write-Host "Applying app settings: $($settings.Count)" -ForegroundColor Gray
+    az functionapp config appsettings set -g $FunctionAppResourceGroupName -n $FunctionAppName --settings $settings --only-show-errors | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Failed to set app settings." -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "No optional settings provided; skipping app settings update." -ForegroundColor Gray
 }
 
 # Link backend

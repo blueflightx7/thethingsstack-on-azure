@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import {
   makeStyles,
   shorthands,
@@ -89,11 +90,74 @@ const useStyles = makeStyles({
 export const OverviewCards = () => {
   const styles = useStyles();
 
+  const [data, setData] = useState<{
+    activeDevices: number;
+    messagesToday: number;
+    gatewaysOnline: number;
+    systemStatus: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const res = await fetch('/api/overview', { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error(`Failed to load overview: ${res.status}`);
+        }
+        const json = await res.json();
+        if (!cancelled) {
+          setData({
+            activeDevices: Number(json.activeDevices ?? 0),
+            messagesToday: Number(json.messagesToday ?? 0),
+            gatewaysOnline: Number(json.gatewaysOnline ?? 0),
+            systemStatus: String(json.systemStatus ?? 'Unknown'),
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setData(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const cards = [
-    { title: 'Active Devices', value: '124', icon: <DeviceMeetingRoom24Regular />, trend: '+12% vs last week' },
-    { title: 'Messages Today', value: '4.5k', icon: <DataUsage24Regular />, trend: '+5% vs yesterday' },
-    { title: 'Gateways Online', value: '8', icon: <Router24Regular />, trend: 'Stable' },
-    { title: 'System Status', value: 'Healthy', icon: <CheckmarkCircle24Regular />, trend: '100% Uptime' },
+    {
+      title: 'Active Devices',
+      value: loading ? '—' : String(data?.activeDevices ?? '—'),
+      icon: <DeviceMeetingRoom24Regular />,
+      trend: loading ? 'Loading…' : (data ? 'Last 24h' : 'Unavailable'),
+    },
+    {
+      title: 'Messages Today',
+      value: loading ? '—' : String(data?.messagesToday ?? '—'),
+      icon: <DataUsage24Regular />,
+      trend: loading ? 'Loading…' : (data ? 'Last 24h' : 'Unavailable'),
+    },
+    {
+      title: 'Gateways Online',
+      value: loading ? '—' : String(data?.gatewaysOnline ?? '—'),
+      icon: <Router24Regular />,
+      trend: loading ? 'Loading…' : (data ? 'Seen last hour' : 'Unavailable'),
+    },
+    {
+      title: 'System Status',
+      value: loading ? '—' : String(data?.systemStatus ?? '—'),
+      icon: <CheckmarkCircle24Regular />,
+      trend: loading ? 'Loading…' : (data ? 'API + SQL' : 'Unavailable'),
+    },
   ];
 
   return (
