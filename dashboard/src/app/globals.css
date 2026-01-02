@@ -2,6 +2,8 @@ html,
 body {
   padding: 0;
   margin: 0;
+  background: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
 }
 
 * {
@@ -17,7 +19,7 @@ main {
 .section {
   margin-top: 20px;
   padding: 16px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--colorNeutralStroke1);
   border-radius: 8px;
 }
 

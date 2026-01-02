@@ -29,6 +29,12 @@ const useStyles = makeStyles({
     ...shorthands.gap('24px'),
     ...shorthands.padding('24px', '0'),
   },
+  section: {
+    display: 'grid',
+    gridTemplateColumns: '1fr',
+    ...shorthands.gap('24px'),
+    ...shorthands.padding('24px', '0'),
+  },
   card: {
     ...shorthands.padding('24px'),
     ...shorthands.borderRadius('12px'),
@@ -84,7 +90,37 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     ...shorthands.gap('4px'),
-  }
+  },
+  listHeader: {
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: '12px',
+  },
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('10px'),
+  },
+  row: {
+    display: 'grid',
+    gridTemplateColumns: '2fr 2fr 2fr 1fr',
+    ...shorthands.gap('12px'),
+    alignItems: 'center',
+    '@media (max-width: 1024px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  rowHeader: {
+    fontSize: '12px',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  hiveName: {
+    fontWeight: 600,
+  },
 });
 
 export const OverviewCards = () => {
@@ -95,6 +131,17 @@ export const OverviewCards = () => {
     messagesToday: number;
     gatewaysOnline: number;
     systemStatus: string;
+    hives: Array<{
+      deviceId: number;
+      devEui: string;
+      hiveIdentity?: string | null;
+      hiveName: string;
+      lastSeenAt?: string | null;
+      lastMeasurementAt?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
+      gatewayIdentifier?: string | null;
+    }>;
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -114,6 +161,7 @@ export const OverviewCards = () => {
             messagesToday: Number(json.messagesToday ?? 0),
             gatewaysOnline: Number(json.gatewaysOnline ?? 0),
             systemStatus: String(json.systemStatus ?? 'Unknown'),
+            hives: Array.isArray(json.hives) ? json.hives : [],
           });
         }
       } catch {
@@ -161,21 +209,69 @@ export const OverviewCards = () => {
   ];
 
   return (
-    <div className={styles.container}>
-      {cards.map((card, index) => (
-        <div key={index} className={styles.card}>
-          <div className={styles.header}>
-            <div className={styles.iconContainer}>
-              <span className={styles.icon}>{card.icon}</span>
+    <div className={styles.section}>
+      <div className={styles.container}>
+        {cards.map((card, index) => (
+          <div key={index} className={styles.card}>
+            <div className={styles.header}>
+              <div className={styles.iconContainer}>
+                <span className={styles.icon}>{card.icon}</span>
+              </div>
+              <Text className={styles.title}>{card.title}</Text>
             </div>
-            <Text className={styles.title}>{card.title}</Text>
+            <div>
+              <Text className={styles.value}>{card.value}</Text>
+              <Text className={styles.trend}>{card.trend}</Text>
+            </div>
           </div>
-          <div>
-            <Text className={styles.value}>{card.value}</Text>
-            <Text className={styles.trend}>{card.trend}</Text>
-          </div>
+        ))}
+      </div>
+
+      <div className={styles.card}>
+        <div className={styles.listHeader}>
+          <Title3>Hives & Locations</Title3>
+          <Text size={200}>
+            {loading ? 'Loading…' : (data ? `Showing ${Math.min(data.hives.length, 10)} of ${data.hives.length}` : 'Unavailable')}
+          </Text>
         </div>
-      ))}
+
+        <div className={styles.list}>
+          <div className={styles.row}>
+            <Text className={styles.rowHeader}>Hive</Text>
+            <Text className={styles.rowHeader}>Last Seen</Text>
+            <Text className={styles.rowHeader}>Location</Text>
+            <Text className={styles.rowHeader}>Gateway</Text>
+          </div>
+
+          {!loading && data?.hives?.length ? (
+            data.hives.slice(0, 10).map((hive) => {
+              const lastSeen = hive.lastSeenAt ?? hive.lastMeasurementAt ?? null;
+              const location =
+                hive.latitude != null && hive.longitude != null
+                  ? `${Number(hive.latitude).toFixed(5)}, ${Number(hive.longitude).toFixed(5)}`
+                  : '—';
+
+              return (
+                <div key={hive.hiveIdentity ?? String(hive.deviceId)} className={styles.row}>
+                  <div>
+                    <Text className={styles.hiveName}>{hive.hiveName}</Text>
+                    <Text size={200}>DevEUI: {hive.devEui || '—'}</Text>
+                  </div>
+                  <Text>
+                    {lastSeen ? new Date(lastSeen).toLocaleString() : '—'}
+                  </Text>
+                  <Text size={200}>{location}</Text>
+                  <Text size={200}>{hive.gatewayIdentifier ?? '—'}</Text>
+                </div>
+              );
+            })
+          ) : (
+            <Text size={200}>
+              {loading ? 'Loading hives…' : 'No hive data available yet.'}
+            </Text>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

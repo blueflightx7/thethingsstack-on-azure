@@ -14,7 +14,7 @@ param tags object = {}
   'Free'
   'Standard'
 ])
-param staticWebAppSku string = 'Free'
+param staticWebAppSku string = 'Standard'
 
 @description('SKU for the Web PubSub service.')
 @allowed([
@@ -49,9 +49,11 @@ module webPubSub 'br/public:avm/res/signal-r-service/web-pub-sub:0.7.2' = {
     location: normalizedLocation
     sku: webPubSubSku
     tags: tags
-    // Defaults are security-oriented:
-    // - disableLocalAuth: true (AAD only)
-    // - clientCertEnabled: false
+    // Enable local auth so connection strings / access keys work.
+    // The current dashboard API uses `WebPubSubConnectionString`.
+    // If/when we move to Entra ID auth, we can flip this back to true.
+    disableLocalAuth: false
+    // clientCertEnabled remains false by default.
   }
 }
 

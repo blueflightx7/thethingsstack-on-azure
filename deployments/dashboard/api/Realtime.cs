@@ -23,6 +23,9 @@ namespace DashboardApi
         {
             _logger.LogInformation("Getting realtime ingestion snapshot.");
 
+            var auth = await Auth.RequireAuthenticatedAsync(req);
+            if (auth != null) return auth;
+
             if (string.IsNullOrWhiteSpace(SqlConnectionString))
             {
                 var missing = req.CreateResponse(HttpStatusCode.InternalServerError);

@@ -14,14 +14,17 @@ namespace DashboardApi
         }
 
         [Function("Negotiate")]
-        public HttpResponseData Run(
+        public async Task<HttpResponseData> Run(
             [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "negotiate")] HttpRequestData req,
             [WebPubSubConnectionInput(Hub = "dashboard", Connection = "WebPubSubConnectionString")] WebPubSubConnection connectionInfo)
         {
+            var auth = await Auth.RequireAuthenticatedAsync(req);
+            if (auth != null) return auth;
+        
             _logger.LogInformation("Generating Web PubSub connection string...");
 
             var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
-            response.WriteAsJsonAsync(connectionInfo);
+            await response.WriteAsJsonAsync(connectionInfo);
 
             return response;
         }

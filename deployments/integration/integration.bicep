@@ -115,6 +115,11 @@ resource processedContainer 'Microsoft.Storage/storageAccounts/blobServices/cont
   name: 'processed-data'
 }
 
+resource deadLetterContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: blobService
+  name: 'dead-letter'
+}
+
 // Lifecycle Management Policy
 resource lifecyclePolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01' = {
   parent: storage
@@ -144,6 +149,7 @@ resource lifecyclePolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2
               prefixMatch: [
                 'raw-telemetry/'
                 'processed-data/'
+                'dead-letter/'
               ]
             }
           }
@@ -327,7 +333,8 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (enableMoni
 var useExistingAi = !empty(existingAppInsightsId)
 var useNewAi = enableMonitoring && createMonitoringResources && !useExistingAi
 
-var appInsightsInstrumentationKey = useExistingAi ? reference(existingAppInsightsId, '2020-02-02').InstrumentationKey : (useNewAi ? appInsights.properties.InstrumentationKey : '')
+// Use reference() for conditional resources to avoid evaluation before creation.
+var appInsightsInstrumentationKey = useExistingAi ? reference(existingAppInsightsId, '2020-02-02').InstrumentationKey : (useNewAi ? reference(appInsights.id, '2020-02-02').InstrumentationKey : '')
 
 resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
   name: '${prefix}-func-${uniqueString(resourceGroup().id)}'

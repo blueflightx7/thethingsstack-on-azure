@@ -128,6 +128,22 @@ BEGIN
     );
 END
 
+-- 2c. Hive Locations (manual override)
+-- Stores fixed physical hive locations that can be set via admin dashboard.
+-- Precedence: HiveLocations override > gateway-derived fallback (Measurements.Latitude/Longitude)
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'HiveLocations')
+BEGIN
+    CREATE TABLE HiveLocations (
+        HiveIdentity UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+        Label NVARCHAR(200) NULL,
+        Latitude DECIMAL(9,6) NULL,
+        Longitude DECIMAL(9,6) NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy NVARCHAR(200) NULL,
+        CreatedAt DATETIME2 DEFAULT GETUTCDATE()
+    );
+END
+
 -- 3. Measurements Table (TimeSeries optimized)
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Measurements')
 BEGIN
@@ -183,6 +199,37 @@ END
 IF COL_LENGTH('Measurements', 'CorrelationId') IS NULL
 BEGIN
     ALTER TABLE Measurements ADD CorrelationId NVARCHAR(512) NULL;
+END
+
+-- Derived sound summary fields (computed from FFT bins to support fast charting)
+IF COL_LENGTH('Measurements', 'SoundEnergyTotal') IS NULL
+BEGIN
+    ALTER TABLE Measurements ADD SoundEnergyTotal BIGINT NULL;
+END
+
+IF COL_LENGTH('Measurements', 'SoundEnergyLow') IS NULL
+BEGIN
+    ALTER TABLE Measurements ADD SoundEnergyLow BIGINT NULL;
+END
+
+IF COL_LENGTH('Measurements', 'SoundEnergyMid') IS NULL
+BEGIN
+    ALTER TABLE Measurements ADD SoundEnergyMid BIGINT NULL;
+END
+
+IF COL_LENGTH('Measurements', 'SoundEnergyHigh') IS NULL
+BEGIN
+    ALTER TABLE Measurements ADD SoundEnergyHigh BIGINT NULL;
+END
+
+IF COL_LENGTH('Measurements', 'SoundDominantBin') IS NULL
+BEGIN
+    ALTER TABLE Measurements ADD SoundDominantBin INT NULL;
+END
+
+IF COL_LENGTH('Measurements', 'SoundDominantBinRange') IS NULL
+BEGIN
+    ALTER TABLE Measurements ADD SoundDominantBinRange NVARCHAR(32) NULL;
 END
 
 -- FK: Measurements.GatewayID -> Gateways.GatewayID

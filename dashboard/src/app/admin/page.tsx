@@ -1,10 +1,10 @@
 import { Suspense } from 'react';
-import HomeClient from './HomeClient';
+import AdminPageClient from './AdminPageClient';
 
 export default function Page() {
   return (
     <Suspense fallback={null}>
-      <HomeClient />
+      <AdminPageClient />
     </Suspense>
   );
 }

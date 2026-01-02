@@ -1,10 +1,10 @@
 import { Suspense } from 'react';
-import HomeClient from './HomeClient';
+import HivePageClient from './HivePageClient';
 
 export default function Page() {
   return (
     <Suspense fallback={null}>
-      <HomeClient />
+      <HivePageClient />
     </Suspense>
   );
 }

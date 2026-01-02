@@ -202,10 +202,9 @@ if ($settings.Count -gt 0) {
 
 # Link backend
 Write-Host "Linking Function App to Static Web App as /api backend..." -ForegroundColor Yellow
-Write-Host "  Backend name: $BackendName" -ForegroundColor Gray
 Write-Host "  Backend region: $($func.location)" -ForegroundColor Gray
 
-az staticwebapp backends link -g $ResourceGroupName -n $StaticWebAppName --backend-resource-id $func.id --backend-region $func.location --backend-name $BackendName --only-show-errors | Out-Host
+az staticwebapp backends link -g $ResourceGroupName -n $StaticWebAppName --backend-resource-id $func.id --backend-region $func.location --only-show-errors | Out-Host
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Backend link failed." -ForegroundColor Red
     exit 1

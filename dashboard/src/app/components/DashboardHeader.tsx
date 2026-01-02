@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import {
   makeStyles,
   shorthands,
@@ -13,8 +14,12 @@ import {
 } from '@fluentui/react-avatar';
 import {
   Button,
+  ToggleButton,
 } from '@fluentui/react-button';
-import { ArrowExit20Regular } from '@fluentui/react-icons';
+import { ArrowExit20Regular, Shield20Regular, WeatherMoon20Regular, WeatherSunny20Regular } from '@fluentui/react-icons';
+import { tokens } from '@fluentui/react-theme';
+import { fetchJson, AuthMeResponse } from '../lib/api';
+import { useThemeMode } from '../providers';
 
 const useStyles = makeStyles({
   header: {
@@ -22,9 +27,9 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     alignItems: 'center',
     ...shorthands.padding('16px', '32px'),
-    backgroundColor: '#ffffff',
-    borderBottom: '1px solid #f0f0f0',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.02)',
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
+    boxShadow: tokens.shadow4,
   },
   titleContainer: {
     display: 'flex',
@@ -32,7 +37,7 @@ const useStyles = makeStyles({
     ...shorthands.gap('12px'),
   },
   logoText: {
-    color: '#0078d4', // Brand blue
+    color: tokens.colorBrandForeground1,
   },
   userContainer: {
     display: 'flex',
@@ -41,26 +46,82 @@ const useStyles = makeStyles({
   },
   userName: {
     fontWeight: 600,
-    color: '#323130',
+    color: tokens.colorNeutralForeground1,
+  },
+  userRole: {
+    color: tokens.colorNeutralForeground3,
   }
 });
 
 export const DashboardHeader = () => {
   const styles = useStyles();
 
+  const { isDark, setMode } = useThemeMode();
+
+  const [user, setUser] = useState<{ name: string; roles: string[] } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const me = await fetchJson<AuthMeResponse>('/.auth/me');
+        const cp = me?.clientPrincipal;
+        if (!cp) return;
+        if (!cancelled) {
+          setUser({
+            name: cp.userDetails || cp.userId,
+            roles: Array.isArray(cp.userRoles) ? cp.userRoles : [],
+          });
+        }
+      } catch {
+        if (!cancelled) setUser(null);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isAdmin = !!user?.roles?.includes('Admin');
+
   return (
     <header className={styles.header}>
       <div className={styles.titleContainer}>
         <Title1 className={styles.logoText}>The Things Stack</Title1>
-        <Text size={500} weight="medium" style={{ color: '#605e5c' }}>| Azure Dashboard</Text>
+        <Text size={500} weight="medium" className={styles.userRole}>
+          | Azure Dashboard
+        </Text>
       </div>
       <div className={styles.userContainer}>
+        <ToggleButton
+          checked={isDark}
+          onClick={() => setMode(isDark ? 'light' : 'dark')}
+          icon={isDark ? <WeatherSunny20Regular /> : <WeatherMoon20Regular />}
+          appearance="subtle"
+        >
+          {isDark ? 'Light' : 'Dark'}
+        </ToggleButton>
+
+        {isAdmin ? (
+          <Button as="a" href="/admin" icon={<Shield20Regular />} appearance="subtle">
+            Admin
+          </Button>
+        ) : null}
+
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-          <Text className={styles.userName}>Admin User</Text>
-          <Text size={200} style={{ color: '#605e5c' }}>Administrator</Text>
+          <Text className={styles.userName}>{user?.name ?? '—'}</Text>
+          <Text size={200} className={styles.userRole}>{isAdmin ? 'Administrator' : 'User'}</Text>
         </div>
-        <Avatar name="Admin User" color="brand" />
-        <Button icon={<ArrowExit20Regular />} appearance="subtle">Sign Out</Button>
+        <Avatar name={user?.name ?? 'User'} color="brand" />
+        <Button
+          as="a"
+          href="/.auth/logout?post_logout_redirect_uri=/"
+          icon={<ArrowExit20Regular />}
+          appearance="subtle"
+        >
+          Sign Out
+        </Button>
       </div>
     </header>
   );

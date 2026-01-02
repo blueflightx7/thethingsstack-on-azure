@@ -1,74 +1,89 @@
-# Azure SQL Database Guide for TTS
+# Azure SQL Database Guide (Integration)
 
-This guide details the database schema, JSON handling, and optimization strategies for the SQL Database used in the integration.
+This guide covers the SQL schema used by the IoT Hub integration (Option 6), how to query JSON payloads, and basic operational guidance.
 
-## 1. Schema Design
+The canonical schema is defined in [deployments/integration/sql/schema.sql](../../deployments/integration/sql/schema.sql).
 
-The database uses a "Hybrid" schema: structured columns for metadata, and a JSON column for the flexible payload.
+## 1. Schema Overview
 
-### Table: `uplink_data`
+The database uses a hybrid model: structured columns for common analytics fields plus a JSON column for the full payload.
 
-| Column | Type | Description |
-| :--- | :--- | :--- |
-| `id` | `uniqueidentifier` | Primary Key (GUID). |
-| `device_id` | `nvarchar(100)` | The LoRaWAN Device EUI or ID. Indexed for fast lookups. |
-| `received_at` | `datetime2` | Timestamp when the message was received by the Function. Indexed. |
-| `payload` | `nvarchar(max)` | The full JSON payload from TTS Webhook. Contains `uplink_message`, `end_device_ids`, etc. |
+### 1.1 Core Tables
 
-## 2. Working with JSON Data
+- `Devices`
+    - Device catalog keyed by `DeviceID`.
+    - Includes `DevEUI` and deterministic `HiveIdentity` (GUID) used to group devices logically.
 
-Azure SQL has native JSON support. You do not need to extract every field into a column.
+- `Gateways`
+    - Gateway catalog keyed by `GatewayID`.
 
-### 2.1 `JSON_VALUE` vs `JSON_QUERY`
+- `HiveIdentityGateways`
+    - Mapping table linking a `HiveIdentity` to one or more gateways (derived during ingestion).
 
-*   **`JSON_VALUE`**: Extracts a scalar value (string, number, boolean).
+- `Measurements`
+    - One row per uplink.
+    - Stores extracted columns (temperature/weight/battery/FFT bins etc) and `RawPayload` JSON.
+    - Includes `CorrelationId` for de-duplication.
+
+## 2. De-duplication (CorrelationId)
+
+`Measurements.CorrelationId` is used to prevent double-inserts when upstream systems retry.
+
+- The schema enforces uniqueness via a unique filtered index.
+- The ingestion function treats unique key violations as duplicates and skips them.
+
+## 3. Working with JSON Data
+
+The `Measurements.RawPayload` column contains both the original payload and a cleaned/extracted view.
+
+### 3.1 `JSON_VALUE` vs `JSON_QUERY`
+
+- `JSON_VALUE` extracts scalars:
     ```sql
-    SELECT JSON_VALUE(payload, '$.uplink_message.f_port')
+    SELECT JSON_VALUE(RawPayload, '$.cleaned.gateway_id')
     ```
-*   **`JSON_QUERY`**: Extracts an object or array.
+
+- `JSON_QUERY` extracts objects/arrays:
     ```sql
-    SELECT JSON_QUERY(payload, '$.uplink_message.rx_metadata')
+    SELECT JSON_QUERY(RawPayload, '$.raw.uplink_message.rx_metadata')
     ```
 
-### 2.2 Performance Indexing
+### 3.2 Example Queries
 
-If you frequently query a specific JSON property (e.g., `f_port`), you should create a **Computed Column** and index it.
-
-```sql
--- 1. Add computed column
-ALTER TABLE uplink_data
-ADD f_port AS CAST(JSON_VALUE(payload, '$.uplink_message.f_port') AS INT);
-
--- 2. Index the computed column
-CREATE INDEX IX_uplink_data_f_port ON uplink_data(f_port);
-```
-
-Now, queries filtering by `f_port` will be extremely fast.
-
-## 3. Maintenance
-
-### 3.1 Index Fragmentation
-
-Over time, indexes can become fragmented.
+**Latest messages (last hour)**
 
 ```sql
--- Check fragmentation
-SELECT * FROM sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, NULL);
-
--- Rebuild index (if > 30%)
-ALTER INDEX ALL ON uplink_data REBUILD;
+SELECT TOP 50
+    [Timestamp],
+    JSON_VALUE(RawPayload, '$.cleaned.device_id') AS device_id,
+    JSON_VALUE(RawPayload, '$.cleaned.gateway_id') AS gateway_id,
+    Temperature_Inner,
+    Weight_KG,
+    BatteryPercent
+FROM Measurements
+WHERE [Timestamp] >= DATEADD(hour, -1, SYSUTCDATETIME())
+ORDER BY [Timestamp] DESC;
 ```
 
-### 3.2 Statistics
-
-Ensure statistics are up to date for the query optimizer.
+**Gateways seen recently (last hour)**
 
 ```sql
-UPDATE STATISTICS uplink_data;
+SELECT
+    JSON_VALUE(RawPayload, '$.cleaned.gateway_id') AS gateway_id,
+    COUNT_BIG(1) AS messages
+FROM Measurements
+WHERE [Timestamp] >= DATEADD(hour, -1, SYSUTCDATETIME())
+    AND JSON_VALUE(RawPayload, '$.cleaned.gateway_id') IS NOT NULL
+GROUP BY JSON_VALUE(RawPayload, '$.cleaned.gateway_id')
+ORDER BY messages DESC;
 ```
 
-## 4. Security
+## 4. Maintenance & Ops
 
-*   **Firewall**: Only allow access from specific IPs or Azure Services.
-*   **Authentication**: Prefer Microsoft Entra ID (formerly Azure AD) authentication over SQL Login/Password.
-*   **Auditing**: Enable "Auditing" in the Azure Portal to track who is accessing the data (logs to Storage Account).
+- **Retention**: implement a scheduled cleanup of old `Measurements` rows (and/or archive downstream).
+- **Index health**: if query performance degrades at high volume, review fragmentation and add targeted indices.
+
+## 5. Security Notes
+
+- **Firewall**: SQL Server is configured with “Allow Azure Services” to support Function access.
+- **Secrets**: connection strings are stored in Key Vault by the deployment scripts.

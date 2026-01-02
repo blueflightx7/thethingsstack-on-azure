@@ -108,6 +108,9 @@ You will be prompted for:
 
 On success, you can test:
 - `https://<your-swa-hostname>/api/overview`
+- `https://<your-swa-hostname>/api/realtime`
+
+The Dashboard API requires the `SqlConnectionString` app setting (same format/value as the Integration Function App) to query the Integration SQL database.
 
 ## Manual UI deploy (advanced)
 
@@ -135,5 +138,5 @@ This will:
 
 - The UI update path is frontend-only. For `/api/*`, use the BYO Functions flow above.
 - Entra ID auth is expected to be enabled for the dashboard, but requires an App Registration and SWA auth configuration. This guide intentionally deploys the core resources first.
-- The Web PubSub endpoint is provisioned for realtime features; the current UI is a read-only shell with placeholders for Fabric RTI embedding and Digital Twins.
+- The Web PubSub endpoint is provisioned for realtime features; current UI polls the Dashboard API endpoints (`/api/overview`, `/api/realtime`) for live-ish metrics.
 - Azure Static Web Apps isn't available in every Azure region. If you deploy from an unsupported region (for example `eastus`), the template will deploy the Static Web App in a supported region (for example `eastus2`).

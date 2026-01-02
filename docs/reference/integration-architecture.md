@@ -14,17 +14,14 @@ graph TD
     end
 
     subgraph "Azure Integration"
+        FuncIngest[Azure Function\n(IngestWebhook)]
         IoTHub[Azure IoT Hub]
-        EventHub[Azure Event Hub]
-        
-        subgraph "Compute & Processing"
-            Func[Azure Functions\n(TtsBridge)]
-            Checkpoints[Blob Storage\n(Checkpoints)]
-        end
-        
+        EventHub[Azure Event Hub\n(fabric-stream)]
+        FuncSql[Azure Function\n(ProcessToSQL)]
+
         subgraph "Data Storage"
             SQL[Azure SQL Database\n(Serverless)]
-            DLQ[Blob Storage\n(Dead Letter)]
+            Storage[Storage Account\n(raw-telemetry / processed-data / dead-letter)]
         end
     end
 
@@ -34,41 +31,42 @@ graph TD
         Apps[Custom Apps]
     end
 
-    TTS -->|HTTP POST| IoTHub
-    IoTHub -->|Routes| EventHub
-    EventHub -->|Trigger| Func
-    Func -->|Read/Write| Checkpoints
-    Func -->|Batch Insert| SQL
-    Func -->|Error| DLQ
-    SQL -->|Query| Fabric
+    TTS -->|HTTP POST| FuncIngest
+    FuncIngest -->|IoT Hub REST API| IoTHub
+    IoTHub -->|Route: ToFabric| EventHub
+    IoTHub -->|Route: ToArchive| Storage
+    EventHub -->|Trigger| FuncSql
+    FuncSql -->|Upsert/insert| SQL
+    FuncSql -->|Write raw + cleaned| Storage
+    EventHub -.Connection String.-> Fabric
     SQL -->|Query| PBI
+    SQL -->|Query| Apps
 ```
 
 ## 2. Component Deep Dive
 
-### 2.1 Azure IoT Hub (Ingestion Gateway)
-*   **Role**: The primary entry point for data from The Things Stack.
+### 2.1 Azure IoT Hub (Ingestion + Routing)
+*   **Role**: Receives messages forwarded by `IngestWebhook` and routes them to Event Hub and Blob Storage.
 *   **Configuration**:
     *   **SKU**: Standard (S1) or Basic (B1) depending on bidirectional needs.
     *   **Authentication**: Shared Access Policy (RegistryReadWrite, ServiceConnect, DeviceConnect).
     *   **Routing**: Custom routing endpoints are configured to send telemetry to Event Hubs.
-*   **Why IoT Hub?**: Provides a secure, scalable MQTT/HTTP endpoint that TTS Webhooks can target. It handles device identity management and can sync TTS device registry with Azure (future capability).
+*   **Why IoT Hub?**: Provides a managed routing layer that splits real-time streaming (Event Hub) from archival (Blob).
 
 ### 2.2 Azure Event Hub (Buffering & Decoupling)
 *   **Role**: Acts as a high-throughput buffer between ingestion (IoT Hub) and processing (Functions).
 *   **Configuration**:
     *   **Partitions**: Default 2 (scalable).
     *   **Retention**: 1 day (configurable).
-    *   **Consumer Groups**: Dedicated consumer group for the Function App (`tts-processor`).
+    *   **Consumer Groups**: The `ProcessToSQL` trigger uses `$Default` (configured in the function binding).
 *   **Why Event Hub?**: Decouples the ingestion rate from the processing rate. If the database slows down, Event Hub buffers the messages, preventing data loss at the webhook level.
 
 ### 2.3 Azure Functions (Processing Engine)
-*   **Role**: Processes incoming telemetry batches and persists them to SQL.
-*   **Runtime**: .NET 8 Isolated (C# script `.csx` for flexibility).
-*   **Pattern**: **Stateless HttpClient**.
-    *   A static `HttpClient` instance is reused across executions to prevent socket exhaustion.
-    *   Uses `SqlConnectionStringBuilder` and `SqlConnection` for efficient database interaction.
-*   **Trigger**: Event Hub Trigger (batches of messages).
+*   **Role**:
+    *   `IngestWebhook`: receives TTS webhook JSON and forwards it into IoT Hub.
+    *   `ProcessToSQL`: consumes Event Hub batches, writes to SQL, and writes two blobs per uplink (raw + cleaned).
+*   **Runtime**: Azure Functions v4, `FUNCTIONS_WORKER_RUNTIME=dotnet`.
+*   **Trigger**: Event Hub Trigger for `ProcessToSQL`.
 *   **Scaling**: Consumption Plan (scales to zero, scales out based on lag).
 
 ### 2.4 Azure SQL Database (Storage & Analytics)
@@ -76,28 +74,32 @@ graph TD
 *   **SKU**: Serverless (General Purpose).
     *   **Auto-pause**: Pauses after 1 hour of inactivity to save costs.
     *   **Auto-scale**: Scales vCores between min (0.5) and max (4) based on load.
-*   **Schema**:
-    *   `uplink_data`: Stores raw JSON payloads and extracted fields (DevEUI, FPort, RSSI, SNR).
-    *   **JSON Support**: Uses `OPENJSON` for efficient querying of the flexible `payload` column.
+*   **Schema** (high level):
+    *   `Devices`: per-device identity (includes deterministic `HiveIdentity`)
+    *   `Gateways`: gateway catalog
+    *   `HiveIdentityGateways`: hive-to-gateway mapping
+    *   `Measurements`: per-uplink measurements with `RawPayload` JSON and `CorrelationId` de-duplication
 
 ### 2.5 Azure Blob Storage (State & Reliability)
-*   **Role**: Supporting storage for the architecture.
+*   **Role**: Raw archival + processed payload storage.
 *   **Containers**:
-    *   `azure-webjobs-hosts`: Function App internal locks and secrets.
-    *   `azure-webjobs-eventhub`: Event Hub checkpoints (cursor position).
-    *   `dead-letter`: Stores messages that failed processing (for replay/analysis).
+    *   `raw-telemetry`: contains IoT Hub archive batches (IoT Hub folder layout) and per-uplink raw blobs written by `ProcessToSQL`.
+    *   `processed-data`: contains per-uplink cleaned/extracted payloads written by `ProcessToSQL`.
+    *   `dead-letter`: contains per-uplink error envelopes written by `ProcessToSQL` when a message cannot be processed.
+*   **Note**: The same Storage Account is also used for the Function host files and Event Hub checkpoints.
 
 ## 3. Data Flow
 
-1.  **Ingest**: TTS Webhook sends a JSON payload (Uplink message) to IoT Hub via HTTP.
-2.  **Route**: IoT Hub routes the message to the built-in Event Hub compatible endpoint.
+1.  **Ingest**: TTS Webhook sends a JSON payload to the Integration Function App (`IngestWebhook`).
+2.  **Forward**: `IngestWebhook` forwards the payload into IoT Hub.
+3.  **Route**: IoT Hub routes the message to Event Hub and to the raw archive container.
 3.  **Buffer**: Event Hub receives the message and stores it in a partition.
-4.  **Trigger**: The `TtsBridge` function wakes up when a batch of messages is ready (or timeout occurs).
+4.  **Trigger**: `ProcessToSQL` wakes up when a batch of messages is ready (or timeout occurs).
 5.  **Process**:
     *   The function iterates through the batch.
     *   It extracts key metadata (DevEUI, Timestamp, Payload).
     *   It constructs a SQL `INSERT` statement (or bulk copy).
-6.  **Persist**: The batch is committed to the `uplink_data` table in Azure SQL.
+6.  **Persist**: The batch is committed to `Measurements` in Azure SQL (with de-duplication by `CorrelationId`).
 7.  **Checkpoint**: The function updates the checkpoint in Blob Storage, marking messages as processed.
 
 ## 4. Security Model
@@ -105,12 +107,9 @@ graph TD
 The architecture adheres to "Secure by Default" principles.
 
 ### 4.1 Identity & Access Management (IAM)
-*   **Managed Identity**: The Function App uses a System-Assigned Managed Identity.
-*   **RBAC Assignments**:
-    *   `Azure Event Hubs Data Receiver`: Function App -> Event Hub.
-    *   `Storage Blob Data Owner`: Function App -> Storage Account.
-    *   `SQL Server Contributor` (or specific DB roles): Function App -> SQL Server.
-*   **No Secrets in Code**: Connection strings use Managed Identity where possible, or Key Vault references.
+*   **App Settings**: The Function App authenticates to IoT Hub, Event Hubs, Storage, and SQL using connection strings injected via app settings.
+*   **Key Vault**: Deployment scripts store connection strings in Key Vault and populate Function App settings from there.
+*   **Managed Identity (optional)**: A system-assigned managed identity can be enabled for the Function App, but the integration currently relies on connection strings rather than RBAC-based data-plane access.
 
 ### 4.2 Network Security
 *   **TLS 1.2**: Enforced on all services (IoT Hub, Event Hub, SQL, Storage).
@@ -131,7 +130,7 @@ The architecture adheres to "Secure by Default" principles.
 
 ### 5.2 Resilience
 *   **Retries**: The Function App has built-in retry policies for transient failures (e.g., SQL connection timeout).
-*   **Dead Lettering**: Messages that fail repeatedly (e.g., malformed JSON) are moved to Blob Storage to prevent blocking the stream.
+*   **Poison Messages**: Malformed messages are logged and skipped so they do not block processing. The raw archive containers can be used to inspect problematic payloads.
 *   **Geo-Redundancy**: Can be enabled for Storage and SQL (RA-GRS) for disaster recovery.
 
 ## 6. Cost Analysis
@@ -154,7 +153,7 @@ Estimated monthly costs for different usage tiers (Central US pricing, subject t
 | Decision | Rationale | Trade-off |
 | :--- | :--- | :--- |
 | **SQL Serverless** | Cost-effective for sporadic IoT traffic patterns. | Slight "cold start" latency (10-30s) if paused. |
-| **C# Script (.csx)** | Allows editing code directly in the portal for quick tweaks. | No CI/CD pipeline by default (requires setup). |
+| **C# Script (.csx)** | Fast iteration for integration processing. | Dependency packaging must be handled explicitly for portal/ZIP deployments. |
 | **Event Hub Buffer** | Protects SQL from write spikes. | Adds slight latency (sub-second) to data availability. |
 | **Managed Identity** | Eliminates credential rotation headaches. | Requires Azure-specific configuration (RBAC). |
 

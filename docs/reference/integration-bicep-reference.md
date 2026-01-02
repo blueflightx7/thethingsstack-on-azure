@@ -7,7 +7,7 @@ This document describes the resources defined in `deployments/integration/integr
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `location` | string | Resource Group Location | Azure region for deployment. |
-| `prefix` | string | `ttsint` | Prefix for resource names (must be unique). |
+| `prefix` | string | `tts-int` | Prefix for resource names (must be unique). |
 | `sqlAdminLogin` | string | `ttsadmin` | Username for SQL Server administrator. |
 | `sqlAdminPassword` | securestring | (Required) | Password for SQL Server administrator. |
 | `enableMonitoring` | bool | `true` | Whether to deploy Application Insights. |
@@ -16,26 +16,37 @@ This document describes the resources defined in `deployments/integration/integr
 
 ### 1. Storage Account (`Microsoft.Storage/storageAccounts`)
 *   **SKU**: Standard_LRS
-*   **Purpose**: Stores Function App code, Event Hub checkpoints, and Dead-letter messages.
-*   **Containers**: `azure-webjobs-hosts`, `azure-webjobs-eventhub`, `dead-letter`.
+*   **Purpose**: Integration storage for:
+	*   IoT Hub raw archive routing endpoint
+	*   `ProcessToSQL` per-uplink raw/cleaned archives
+	*   Function host files + Event Hub checkpoints
+*   **Containers**:
+	*   `raw-telemetry`
+	*   `processed-data`
+	*   `dead-letter`
+	*   (plus Azure Functions internal containers such as `azure-webjobs-hosts` / checkpoint state)
 
 ### 2. Azure IoT Hub (`Microsoft.Devices/IotHubs`)
-*   **SKU**: S1 (Standard)
-*   **Purpose**: MQTT/HTTP ingestion point for TTS Webhooks.
-*   **Routing**: Configured to route all messages to the Event Hub.
+*   **SKU**: B1 (Basic)
+*   **Purpose**: Message ingestion + routing for telemetry.
+*   **Routing**:
+	*   `ToFabric` → Event Hub (`fabric-stream`)
+	*   `ToArchive` → Storage container `raw-telemetry`
 
 ### 3. Event Hub Namespace (`Microsoft.EventHub/namespaces`)
 *   **SKU**: Basic
 *   **Purpose**: High-throughput message bus.
-*   **Hubs**: `telemetry` (2 partitions).
+*   **Hubs**: `fabric-stream` (2 partitions).
 
 ### 4. App Service Plan (`Microsoft.Web/serverfarms`)
 *   **SKU**: Y1 (Dynamic/Consumption)
 *   **Purpose**: Hosting plan for the Function App.
 
 ### 5. Function App (`Microsoft.Web/sites`)
-*   **Runtime**: .NET 8 Isolated
-*   **Purpose**: Runs the `TtsBridge` function.
+*   **Runtime**: Azure Functions v4 (`FUNCTIONS_WORKER_RUNTIME=dotnet`)
+*   **Purpose**: Runs:
+	*   `IngestWebhook` (HTTP)
+	*   `ProcessToSQL` (Event Hub trigger)
 *   **Identity**: System Assigned Managed Identity enabled.
 
 ### 6. SQL Server (`Microsoft.Sql/servers`)
