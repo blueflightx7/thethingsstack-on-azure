@@ -97,18 +97,16 @@ All diagrams are scalable vector graphics (SVG) with Azure branding.
 
 ## 🔍 Folder Structure
 
+- `docs/deploy/dashboard-deployment.md` - Dashboard deployment guide
+- `docs/deploy/dashboard-auth.md` - Dashboard authentication & role setup (SWA + Entra)
+
 ```
-docs/
-├── index.md                          # 👈 START HERE
-├── STYLE_GUIDE.md
-├── REORGANIZATION_IMPLEMENTATION_GUIDE.md
-├── DOCUMENTATION_REVAMP_SUMMARY.md
-├── learn/                            # Concepts & getting started
-├── deploy/                           # Deployment guides
-├── operate/                          # Operations & troubleshooting
-├── reference/                        # Technical deep-dives
-├── history/                          # Project evolution
-└── media/
+learn/                            # Concepts & getting started
+deploy/                           # Deployment guides
+operate/                          # Operations & troubleshooting
+reference/                        # Technical deep-dives
+history/                          # Project evolution
+media/
     ├── architecture/                 # Architecture diagrams
     ├── diagrams/                     # Flow charts & trees
     └── screenshots/                  # UI screenshots (future)

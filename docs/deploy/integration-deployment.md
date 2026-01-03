@@ -2,7 +2,7 @@
 
 > **Deploy Azure IoT Hub data intelligence infrastructure to bridge TTS telemetry to Azure analytics platform**
 
-_Last updated: December 3, 2025_
+_Last updated: December 30, 2025_
 
 ---
 
@@ -186,7 +186,7 @@ graph TB
     end
     
     subgraph "Integration Resources (New)"
-        Func[Azure Function<br/>TtsBridge]
+        Func[Azure Function App<br/>IngestWebhook + ProcessToSQL]
         IoT[IoT Hub<br/>Basic B1]
         EH[Event Hub<br/>fabric-stream]
         Blob[Blob Storage<br/>Data Lake Gen2]
@@ -235,7 +235,7 @@ sequenceDiagram
     participant Device as LoRaWAN Device
     participant GW as Gateway
     participant TTS as TTS Server
-    participant Func as Azure Function
+    participant Func as Azure Function App
     participant IoT as IoT Hub
     participant EH as Event Hub
     participant Blob as Blob Storage
@@ -246,26 +246,54 @@ sequenceDiagram
     GW->>TTS: UDP packet (port 1700)
     TTS->>TTS: Decrypt, decode payload
     TTS->>Func: HTTP POST webhook
-    Note over Func: Extract device ID<br/>Generate SAS token
+    Note over Func: IngestWebhook: forward to IoT Hub
     Func->>IoT: POST /devices/{id}/messages/events
     
     IoT->>EH: Route: ToFabric (all messages)
-    IoT->>Blob: Route: ToArchive (batched)
+    IoT->>Blob: Route: ToArchive (batched raw archive)
     
     EH->>Fabric: Real-time stream
     Note over Fabric: Live dashboard<br/><1 second latency
     
     Note over Blob: Lifecycle:<br/>Hot→Cool(30d)→Archive(90d)
-    
-    Blob-->>SQL: Future: Event Grid trigger<br/>(ProcessTelemetry function)
+
+    Note over EH,Func: ProcessToSQL: consume from Event Hub
+    EH->>Func: Batch of messages
+    Func->>SQL: Upsert/insert Devices/Gateways/Measurements
+    Func->>Blob: Write 2 blobs per uplink (raw + cleaned)
 ```
 
 ### Component Responsibilities
 
+#### Blob Storage Layout
+
+The integration uses three containers in the Integration Storage Account:
+
+- `raw-telemetry`: IoT Hub routing archive batches + per-uplink raw blobs written by `ProcessToSQL`
+- `processed-data`: per-uplink cleaned/extracted payloads written by `ProcessToSQL`
+- `dead-letter`: per-uplink dead-letter envelopes written by `ProcessToSQL` when a message cannot be processed
+
+**Important**: `raw-telemetry` contains two different layouts:
+
+1. **IoT Hub routing archive** (batched):
+    - `raw-telemetry/<iothub>/<partition>/<YYYY>/<MM>/<DD>/<HH>/<mm>/...`
+
+2. **Per-uplink archives written by `ProcessToSQL`**:
+    - `raw-telemetry/<gateway>/<YYYYMMDD>/<device>/<timestamp>__<device>__<correlation>.raw.json`
+    - `processed-data/<gateway>/<YYYYMMDD>/<device>/<timestamp>__<device>__<correlation>.cleaned.json`
+
+3. **Dead-letter envelopes written by `ProcessToSQL`**:
+    - `dead-letter/<gateway>/<YYYYMMDD>/<device>/<timestamp>__<device>__<correlation>__<stage>.deadletter.json`
+
+Where:
+- `<gateway>` is derived from the message gateway id
+- `<device>` is derived from `end_device_ids.device_id` / `dev_eui`
+- `<correlation>` is derived from `correlation_ids[0]` when present (fallback is a deterministic hash)
+
 | Component | Purpose | Technology | Scaling |
 |-----------|---------|------------|---------|
 | **TTS Webhook** | Sends telemetry on device events | HTTP POST | N/A (TTS managed) |
-| **Azure Function** | Bridge webhook to IoT Hub | C# HTTP Trigger | Auto-scale (Consumption) |
+| **Azure Function App** | Ingest + processing (`IngestWebhook`, `ProcessToSQL`) | Azure Functions v4 (C#) | Auto-scale (Consumption) |
 | **IoT Hub** | Message ingestion and routing | AMQP/MQTT broker | B1: 400K msgs/day |
 | **Event Hub** | Real-time streaming | Kafka-compatible | Basic: 1M events/day |
 | **Blob Storage** | Raw message archival | Data Lake Gen2 | Unlimited |
@@ -276,7 +304,7 @@ sequenceDiagram
 
 All traffic flows over HTTPS (TLS 1.2+):
 
-1. **TTS → Function**: Public HTTPS webhook (secured with URL obscurity)
+1. **TTS → Function**: Public HTTPS webhook
 2. **Function → IoT Hub**: HTTPS REST API with SAS token authentication
 3. **IoT Hub → Event Hub**: Internal Azure backbone (AMQP)
 4. **IoT Hub → Blob Storage**: Internal Azure backbone
@@ -284,7 +312,7 @@ All traffic flows over HTTPS (TLS 1.2+):
 
 **Security Notes:**
 - No public endpoints exposed except Function webhook
-- All authentication uses SAS tokens or Managed Identity
+- All authentication uses SAS tokens / connection strings (stored in Key Vault)
 - Secrets stored in Key Vault with RBAC
 - Storage and SQL enforce TLS 1.2 minimum
 
@@ -470,7 +498,8 @@ curl -X POST \
       "format": "json",
       "base_url": "'"$WEBHOOK_URL"'",
       "headers": {
-        "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "x-functions-key": "'"$FUNCTION_KEY"'"
       },
       "uplink_message": {
         "path": ""
@@ -506,6 +535,14 @@ curl -X POST \
    ```
 
 #### 1.3 Run Configuration Script
+
+Before running, set the `FUNCTION_KEY` used for the `x-functions-key` header. The deployment stores it in Key Vault as `integration-webhook-functions-key`.
+
+From your deployment machine (where you ran `deploy.ps1`), retrieve it with:
+
+```bash
+az keyvault secret show --vault-name <your-keyvault-name> --name integration-webhook-functions-key --query value -o tsv
+```
 
 Execute on your TTS VM:
 
@@ -1066,7 +1103,7 @@ az monitor metrics list `
 
 ### Advanced Configuration
 
-1. **Add SQL Processing Function**: Create Azure Function triggered by Blob Storage Event Grid to populate SQL database from archived messages
+1. **Tune de-duplication**: Validate `CorrelationId` extraction matches your upstream (TTS / gateways) correlation ID conventions
 2. **Implement Data Retention**: Configure Logic App to archive old SQL data to Blob Storage and truncate
 3. **Add Custom IoT Hub Routes**: Route specific message types to different Event Hubs
 4. **Enable IoT Hub Device Provisioning**: Automate device identity creation for new TTS devices

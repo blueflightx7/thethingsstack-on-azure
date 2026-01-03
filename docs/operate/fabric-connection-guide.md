@@ -31,23 +31,25 @@ Shortcuts allow you to reference data without moving it.
 4.  **Authentication**:
     *   Select **Organizational account** (if your Entra ID user has access).
     *   Or **Basic** (using the SQL Admin login created during deployment).
-5.  Select the `uplink_data` table.
+5.  Select the `Measurements` table.
 6.  Click **Create**.
 
-The table will now appear in your Fabric explorer as if it were a local table.
+Select the `Measurements` table (and optionally `Devices`). The tables will now appear in your Fabric explorer as if they were local tables.
 
 ## Step 4: Analyze with SQL Endpoint
 
 You can now write SQL queries directly in Fabric:
 
 ```sql
--- Calculate average RSSI per device
+-- Calculate average RSSI per device (last 24h)
 SELECT 
-    device_id, 
-    AVG(CAST(JSON_VALUE(payload, '$.uplink_message.rx_metadata[0].rssi') AS FLOAT)) as avg_rssi,
-    COUNT(*) as message_count
-FROM uplink_data
-GROUP BY device_id
+        JSON_VALUE(RawPayload, '$.cleaned.device_id') AS device_id,
+        AVG(TRY_CAST(JSON_VALUE(RawPayload, '$.cleaned.rssi') AS FLOAT)) AS avg_rssi,
+        COUNT_BIG(1) AS message_count
+FROM Measurements
+WHERE [Timestamp] >= DATEADD(day, -1, SYSUTCDATETIME())
+    AND JSON_VALUE(RawPayload, '$.cleaned.device_id') IS NOT NULL
+GROUP BY JSON_VALUE(RawPayload, '$.cleaned.device_id')
 ```
 
 ## Step 5: Visualize in Power BI
@@ -62,10 +64,10 @@ GROUP BY device_id
 ```sql
 CREATE VIEW v_Telemetry AS
 SELECT
-    id,
-    device_id,
-    received_at,
-    CAST(JSON_VALUE(payload, '$.uplink_message.decoded_payload.temperature') AS FLOAT) as temperature,
-    CAST(JSON_VALUE(payload, '$.uplink_message.decoded_payload.humidity') AS FLOAT) as humidity
-FROM uplink_data;
+    MeasurementID,
+    [Timestamp],
+    JSON_VALUE(RawPayload, '$.cleaned.device_id') AS device_id,
+    Temperature_Inner AS temperature,
+    TRY_CAST(JSON_VALUE(RawPayload, '$.raw.uplink_message.decoded_payload.humidity') AS FLOAT) AS humidity
+FROM Measurements;
 ```

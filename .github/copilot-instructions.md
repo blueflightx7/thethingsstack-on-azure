@@ -16,7 +16,8 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
 ├── Mode: quick ──► deployments/vm/deploy-simple.ps1 ──► deployments/vm/tts-docker-deployment.bicep
 ├── Mode: aks ────► deployments/kubernetes/deploy-aks.ps1 ──► deployments/kubernetes/tts-aks-deployment.bicep
 ├── Mode: vm ─────► Inline advanced deployment ──► deployments/vm/tts-docker-deployment.bicep
-└── Mode: integration ──► deployments/integration/deploy-integration.ps1 ──► deployments/integration/integration.bicep
+├── Mode: integration ──► deployments/integration/deploy-integration.ps1 ──► deployments/integration/integration.bicep
+└── Mode: dashboard ──► deployments/dashboard/deploy-dashboard.ps1 ──► deployments/dashboard/dashboard.bicep
 ```
 
 **Never suggest using scripts directly** - always route through `deploy.ps1` with `-Mode` parameter.
@@ -114,6 +115,23 @@ deploy.ps1 (PRIMARY ORCHESTRATOR - SINGLE ENTRY POINT)
 - **Storage**: Must use `minimumTlsVersion: 'TLS1_2'` and `supportsHttpsTrafficOnly: true`.
 - **Functions**: Use stateless `HttpClient` pattern (avoid `CreateCloudBlobClient` connection limits).
 - **Naming**: Storage account names must not contain hyphens (use `replace(prefix, '-', '')`).
+
+### 14. Dashboard Deployment (Option 7)
+
+**Architecture**:
+- **Frontend**: Next.js 14 (Static Export) hosted on Azure Static Web Apps (Free/Standard).
+- **Backend**: Azure Web PubSub for realtime updates (future integration).
+- **UI Library**: Fluent UI v9 (`@fluentui/react-components`, `@fluentui/react-card`, `@griffel/react`).
+
+**Deployment Flow**:
+1. **Infrastructure**: `deployments/dashboard/dashboard.bicep` creates SWA and Web PubSub.
+2. **Build**: `npm run build` generates static assets in `dashboard/out`.
+3. **Deploy**: Azure Static Web Apps CLI (`swa`) pushes `out` folder to Azure.
+
+**Troubleshooting**:
+- **Default Page**: If SWA shows default page after deploy, wait 5-10 mins or hard refresh (caching).
+- **Build Errors**: Ensure `@fluentui/react-card` and `@fluentui/react-icons` are installed.
+- **SWA CLI**: Must be installed (`npm i -g @azure/static-web-apps-cli`) or run via `npx`.
 
 ### 2. Bicep Template Structure
 

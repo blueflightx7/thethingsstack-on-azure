@@ -16,20 +16,18 @@ This plan adds a new deployment mode to the existing `deploy.ps1` orchestrator. 
 
 ```mermaid
 graph TD
-    TTS[The Things Stack] -->|HTTP Webhook| Func_Ingest[Azure Function\n(Webhook Receiver)]
-    Func_Ingest -->|AMQP| IoTHub[Azure IoT Hub]
-    
+    TTS[The Things Stack] -->|HTTP Webhook| Func_Ingest[Azure Function\n(IngestWebhook)]
+    Func_Ingest -->|IoT Hub REST API| IoTHub[Azure IoT Hub]
+
     subgraph "Azure IoT & Data Platform"
-        IoTHub -->|Route: Telemetry| EventHub[Event Hub]
-        IoTHub -->|Route: Archive| BlobRaw[Blob Storage\n(Raw JSON)]
-        
+        IoTHub -->|Route: ToFabric| EventHub[Event Hub\n(fabric-stream)]
+        IoTHub -->|Route: ToArchive| BlobRaw[Blob Storage\n(raw-telemetry)]
+
         EventHub -->|Stream| Fabric[Azure Fabric\n(Real-Time Intelligence)]
-        
-        BlobRaw -->|Event Grid: BlobCreated| Func_Process[Azure Function\n(Data Processor)]
-        
-        Func_Process -->|Write| SQL[Azure SQL Database\n(Measurements/Hives)]
-        Func_Process -->|Write| Table[Table Storage\n(Key-Value/State)]
-        Func_Process -->|Write| BlobProc[Blob Storage\n(Formulated JSON)]
+        EventHub -->|Trigger| Func_Process[Azure Function\n(ProcessToSQL)]
+
+        Func_Process -->|Write| SQL[Azure SQL Database\n(Devices/Measurements/Gateways)]
+        Func_Process -->|Write raw + cleaned| BlobProc[Blob Storage\n(raw-telemetry / processed-data)]
     end
 ```
 
@@ -46,16 +44,15 @@ graph TD
     *   **Lifecycle Policy**: Move to Cool after 30 days, Archive after 90 days.
 4.  **Azure SQL Database (Serverless)**
     *   Auto-pause enabled (1 hour delay) to save costs.
-    *   Schema: `Devices`, `Measurements`, `Alerts` (mapped from Beep API).
+    *   Schema: `Devices`, `Measurements`, `Gateways`, `HiveIdentityGateways` (additive; see `deployments/integration/sql/schema.sql`).
 5.  **Azure Function App (Consumption Plan)**
-    *   **Runtime**: .NET 8 Isolated or PowerShell (depending on complexity).
+    *   **Runtime**: Azure Functions v4 (C# / `FUNCTIONS_WORKER_RUNTIME=dotnet`).
     *   **Functions**:
         *   `IngestWebhook`: Accepts TTS JSON, pushes to IoT Hub.
-        *   `ProcessTelemetry`: Triggered by Event Grid (Blob Created), parses data, writes to SQL/Table.
-6.  **Event Grid System Topic**
-    *   Source: Storage Account.
-    *   Filter: `/blobServices/default/containers/raw-telemetry`.
-    *   Target: `ProcessTelemetry` Function.
+        *   `ProcessToSQL`: Triggered by Event Hub (`fabric-stream`), parses data, writes to SQL, writes raw + cleaned payloads to Blob.
+
+6.  **Event Grid System Topic (Provisioned)**
+    *   The deployment provisions an Event Grid System Topic for the Storage Account, but the current processing path does not require an Event Grid subscription.
 
 ### B. Orchestration Scripts
 1.  **`deployments/integration/deploy-integration.ps1`**
@@ -69,7 +66,7 @@ graph TD
 
 ### C. Data Schema (`deployments/integration/sql/schema.sql`)
 *   Based on Beep API documentation.
-*   Tables: `hives`, `devices`, `measurements`, `alerts`.
+*   Tables: `Devices`, `Measurements`, `Gateways`, `HiveIdentityGateways` (and related indices/constraints).
 
 ## 4. Implementation Steps
 

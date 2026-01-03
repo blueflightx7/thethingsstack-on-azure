@@ -115,6 +115,11 @@ resource processedContainer 'Microsoft.Storage/storageAccounts/blobServices/cont
   name: 'processed-data'
 }
 
+resource deadLetterContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: blobService
+  name: 'dead-letter'
+}
+
 // Lifecycle Management Policy
 resource lifecyclePolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01' = {
   parent: storage
@@ -144,6 +149,7 @@ resource lifecyclePolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2
               prefixMatch: [
                 'raw-telemetry/'
                 'processed-data/'
+                'dead-letter/'
               ]
             }
           }
@@ -327,7 +333,8 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (enableMoni
 var useExistingAi = !empty(existingAppInsightsId)
 var useNewAi = enableMonitoring && createMonitoringResources && !useExistingAi
 
-var appInsightsInstrumentationKey = useExistingAi ? reference(existingAppInsightsId, '2020-02-02').InstrumentationKey : (useNewAi ? appInsights.properties.InstrumentationKey : '')
+// Use reference() for conditional resources to avoid evaluation before creation.
+var appInsightsInstrumentationKey = useExistingAi ? reference(existingAppInsightsId, '2020-02-02').InstrumentationKey : (useNewAi ? reference(appInsights.id, '2020-02-02').InstrumentationKey : '')
 
 resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
   name: '${prefix}-func-${uniqueString(resourceGroup().id)}'
@@ -367,20 +374,20 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
         }
         {
           name: 'SqlConnectionString'
-          value: 'Server=tcp:${sqlServer.properties.fullyQualifiedDomainName},1433;Initial Catalog=${sqlDb.name};Persist Security Info=False;User ID=${sqlAdminLogin};Password=${sqlAdminPassword};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+          value: 'Server=tcp:${sqlServer.properties.fullyQualifiedDomainName},1433;Initial Catalog=${sqlDb.name};Persist Security Info=False;User ID=${sqlAdminLogin};Password="${sqlAdminPassword}";MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
         }
         {
           name: 'EventHubConnection'
           value: eventHubAuthRule.listKeys().primaryConnectionString
         }
         {
-          // Force Kudu/Oryx remote build so csx NuGet packages restore during zip deployment
+          // We ship dependencies in wwwroot/bin; avoid remote build/package restore.
           name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
-          value: 'true'
+          value: 'false'
         }
         {
           name: 'ENABLE_ORYX_BUILD'
-          value: 'true'
+          value: 'false'
         }
       ]
     }
@@ -416,7 +423,7 @@ resource secretSql 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
   parent: keyVault
   name: 'integration-sql-connection'
   properties: {
-    value: 'Server=tcp:${sqlServer.properties.fullyQualifiedDomainName},1433;Initial Catalog=${sqlDb.name};Persist Security Info=False;User ID=${sqlAdminLogin};Password=${sqlAdminPassword};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+    value: 'Server=tcp:${sqlServer.properties.fullyQualifiedDomainName},1433;Initial Catalog=${sqlDb.name};Persist Security Info=False;User ID=${sqlAdminLogin};Password="${sqlAdminPassword}";MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
   }
 }
 

@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@fluentui/react-image": "^9.3.11",
+    "@fluentui/react-text": "^9.6.11"
+  }
+}

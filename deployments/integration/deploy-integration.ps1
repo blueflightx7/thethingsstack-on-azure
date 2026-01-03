@@ -55,6 +55,10 @@ param(
     
     [Parameter(Mandatory=$true)]
     [string]$KeyVaultName
+
+    ,
+    [Parameter(Mandatory=$false)]
+    [string]$SqlAdminPassword
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,11 +71,54 @@ Write-Host "`n╔═════════════════════
 Write-Host "║   Deploying IoT Hub & Data Intelligence Integration              ║" -ForegroundColor Cyan
 Write-Host "╚══════════════════════════════════════════════════════════════════╝`n" -ForegroundColor Cyan
 
-# 1. Generate SQL Admin Password
-Write-Host "Generating secure SQL Admin password..." -ForegroundColor Yellow
-$sqlPassword = -join ((33..126) | Get-Random -Count 16 | ForEach-Object {[char]$_})
-# Ensure complexity requirements
-$sqlPassword += "Aa1!"
+# 1. Determine SQL Admin Password
+function New-SafeSqlPassword {
+    param([int]$Length = 24)
+
+    # Avoid characters that break ADO.NET connection strings (notably ';' and '"').
+    # Azure SQL also requires complexity, so we guarantee: upper/lower/digit/special.
+    $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+    $lower = 'abcdefghijkmnopqrstuvwxyz'
+    $digits = '23456789'
+    $special = '!@#$%^*_-'
+    $all = ($upper + $lower + $digits + $special).ToCharArray()
+
+    if ($Length -lt 12) { $Length = 12 }
+
+    $chars = @(
+        $upper[(Get-Random -Minimum 0 -Maximum $upper.Length)]
+        $lower[(Get-Random -Minimum 0 -Maximum $lower.Length)]
+        $digits[(Get-Random -Minimum 0 -Maximum $digits.Length)]
+        $special[(Get-Random -Minimum 0 -Maximum $special.Length)]
+    )
+
+    while ($chars.Count -lt $Length) {
+        $chars += $all[(Get-Random -Minimum 0 -Maximum $all.Length)]
+    }
+
+    # Shuffle
+    -join ($chars | Get-Random -Count $chars.Count)
+}
+
+if ([string]::IsNullOrWhiteSpace($SqlAdminPassword)) {
+    $choice = Read-Host "SQL admin password: [E]nter your own or [G]enerate one? (Default: Generate)"
+    if ($choice -match '^[Ee]') {
+        $secure = Read-Host -AsSecureString "Enter SQL admin password (avoid ';' and '"')"
+        $SqlAdminPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+    } else {
+        $SqlAdminPassword = New-SafeSqlPassword
+    }
+}
+
+if ($SqlAdminPassword -match ';') {
+    throw "SqlAdminPassword contains ';' which breaks connection strings. Please choose a password without semicolons."
+}
+if ($SqlAdminPassword -match '"') {
+    throw "SqlAdminPassword contains a double-quote (\"") which is not supported by our connection-string quoting. Please choose a password without double-quotes."
+}
+
+Write-Host "Using SQL admin password (will be stored in Key Vault as 'integration-sql-admin-password')." -ForegroundColor Yellow
+$sqlPassword = $SqlAdminPassword
 
 # 2. Deploy Bicep Template
 Write-Host "Deploying infrastructure (IoT Hub, SQL, Event Hub, Functions)..." -ForegroundColor Yellow
@@ -176,7 +223,7 @@ try {
     $deviceId = "TTS-Bridge"
     Write-Host "Checking/Creating IoT Hub device identity: $deviceId" -ForegroundColor Gray
     # Check if device exists, if not create it
-    $deviceExists = az iot hub device-identity show --device-id $deviceId --hub-name $iotHubName --output none 2>&1
+    az iot hub device-identity show --device-id $deviceId --hub-name $iotHubName --output none 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
         az iot hub device-identity create --device-id $deviceId --hub-name $iotHubName | Out-Null
     }
@@ -187,21 +234,59 @@ try {
     # Set App Setting (service connection for auto-registration)
     Write-Host "Setting IoTHubConnectionString (service-level)..." -ForegroundColor Gray
     az functionapp config appsettings set --name $functionAppName --resource-group $ResourceGroupName --settings "IoTHubConnectionString=$iotHubConnString" | Out-Null
-    # Enable remote build so function.proj packages restore during zip deploy
-    az functionapp config appsettings set --name $functionAppName --resource-group $ResourceGroupName --settings "SCM_DO_BUILD_DURING_DEPLOYMENT=true" "ENABLE_ORYX_BUILD=true" | Out-Null
+    # We ship dependencies in wwwroot/bin; avoid remote build/package restore.
+    az functionapp config appsettings set --name $functionAppName --resource-group $ResourceGroupName --settings "SCM_DO_BUILD_DURING_DEPLOYMENT=false" "ENABLE_ORYX_BUILD=false" | Out-Null
     
     # Deploy Code
     Write-Host "Deploying Function Code..." -ForegroundColor Yellow
     $funcDir = "$PSScriptRoot\function"
     $zipPath = "$PSScriptRoot\function.zip"
+
+    # Prepare root-level dependencies for C# script functions (e.g., Microsoft.Data.SqlClient)
+    $prepDeps = Join-Path $funcDir 'prepare-deps.ps1'
+    if (Test-Path $prepDeps) {
+        Write-Host "Preparing Function dependencies..." -ForegroundColor Gray
+        & $prepDeps
+    }
     
     if (Test-Path $zipPath) { Remove-Item $zipPath }
     Compress-Archive -Path "$funcDir\*" -DestinationPath $zipPath
     
     az functionapp deployment source config-zip --resource-group $ResourceGroupName --name $functionAppName --src $zipPath
     Remove-Item $zipPath
+
+    # Ensure triggers/routes are registered after deployment
+    Write-Host "Restarting Function App and syncing triggers..." -ForegroundColor Gray
+    az functionapp restart --resource-group $ResourceGroupName --name $functionAppName | Out-Null
+    # NOTE: Some Azure CLI versions don't expose sync-function-triggers; deploy.ps1 uses az rest elsewhere.
+    try {
+        az functionapp sync-function-triggers --resource-group $ResourceGroupName --name $functionAppName | Out-Null
+    } catch {
+        Write-Host "sync-function-triggers not available; skipping." -ForegroundColor Yellow
+    }
+
+    # Retrieve a Function key for header-based webhook auth (x-functions-key)
+    # NOTE: We intentionally do NOT append ?code= to the URL because the target environment requires header auth.
+    Write-Host "Retrieving Function key for TTS webhook auth..." -ForegroundColor Gray
+    $functionKey = az functionapp keys list --name $functionAppName --resource-group $ResourceGroupName --query "functionKeys.default" -o tsv
+    if ([string]::IsNullOrWhiteSpace($functionKey)) {
+        $functionKey = az functionapp keys list --name $functionAppName --resource-group $ResourceGroupName --query "hostKeys.default" -o tsv
+    }
+
+    $functionKeySecretName = "integration-webhook-functions-key"
+    if (-not [string]::IsNullOrWhiteSpace($functionKey)) {
+        Write-Host "Storing Function key in Key Vault secret '$functionKeySecretName'..." -ForegroundColor Gray
+        az keyvault secret set --vault-name $KeyVaultName --name $functionKeySecretName --value $functionKey --output none | Out-Null
+    } else {
+        Write-Warning "Could not retrieve a Function key automatically. You'll need to add it manually when configuring the TTS webhook header 'x-functions-key'."
+    }
     
     Write-Host "✓ Function App Configured" -ForegroundColor Green
+
+    # Store SQL admin password (for recovery / external tooling). The connection string is already stored by Bicep.
+    $sqlPasswordSecretName = 'integration-sql-admin-password'
+    Write-Host "Storing SQL admin password in Key Vault secret '$sqlPasswordSecretName'..." -ForegroundColor Gray
+    az keyvault secret set --vault-name $KeyVaultName --name $sqlPasswordSecretName --value $sqlPassword --output none | Out-Null
 }
 catch {
     Write-Error "Deployment failed: $_"
@@ -242,6 +327,7 @@ $helperContent = @"
 WEBHOOK_URL="$webhookUrl"
 API_KEY="<YOUR_TTS_API_KEY>"
 APP_ID="<YOUR_APP_ID>"
+FUNCTION_KEY="<YOUR_FUNCTION_KEY>"  # Key Vault secret: $functionKeySecretName
 
 echo "Configuring Webhook for \$APP_ID..."
 
@@ -252,6 +338,9 @@ curl -X POST \
   -d '{
     "ids": { "webhook_id": "azure-integration" },
     "base_url": "'"\$WEBHOOK_URL"'",
+        "headers": {
+            "x-functions-key": "'"\$FUNCTION_KEY"'"
+        },
     "format": "json",
     "uplink_message": { "path": "" },
     "join_accept": { "path": "" },
@@ -277,11 +366,16 @@ Write-Host "╚═════════════════════�
 Write-Host "`n1. Webhook URL:" -ForegroundColor White
 Write-Host "   $webhookUrl" -ForegroundColor Green
 
-Write-Host "`n2. Fabric Event Hub Connection String:" -ForegroundColor White
+Write-Host "`n2. Function Key (for x-functions-key header):" -ForegroundColor White
+Write-Host "   Stored in Key Vault secret: $functionKeySecretName" -ForegroundColor Green
+Write-Host "   Retrieve with:" -ForegroundColor Gray
+Write-Host "   az keyvault secret show --vault-name $KeyVaultName --name $functionKeySecretName --query value -o tsv" -ForegroundColor Gray
+
+Write-Host "`n3. Fabric Event Hub Connection String:" -ForegroundColor White
 Write-Host "   $eventHubConn" -ForegroundColor Green
 Write-Host "   (Use this in Azure Fabric -> Real-Time Intelligence -> Eventstream)" -ForegroundColor Gray
 
-Write-Host "`n3. Next Steps:" -ForegroundColor White
+Write-Host "`n4. Next Steps:" -ForegroundColor White
 Write-Host "   a. Run 'configure-tts-webhook.sh' on your TTS VM" -ForegroundColor Gray
 Write-Host "   b. Connect Azure Fabric using the connection string above" -ForegroundColor Gray
 Write-Host "   c. Verify data is flowing to SQL Database '$dbName'" -ForegroundColor Gray

@@ -50,6 +50,7 @@ This repository provides **Infrastructure as Code (IaC)** for deploying [The Thi
 - **Development/Testing**: Rapid environment provisioning for testing devices and gateways
 - **Production IoT**: Enterprise-grade LoRaWAN infrastructure with Azure backing
 - **Multi-Region Deployments**: Blueprint for global LoRaWAN coverage
+- **Visualization**: Real-time dashboard for network health and device metrics
 
 ### Key Capabilities
 
@@ -196,6 +197,25 @@ chmod +x deploy.sh
 **Deployment Time**: 20-30 minutes (cluster provisioning + application deployment)
 
 #### Option 6: IoT Hub & Data Intelligence (Integration)
+
+**PowerShell**:
+```powershell
+# Deploy integration resources (Function App + Event Grid)
+.\deploy.ps1 -Mode integration
+```
+
+#### Option 7: Dashboard (Visualization)
+
+**PowerShell**:
+```powershell
+# Deploy dashboard infrastructure and UI
+.\deploy.ps1 -Mode dashboard
+```
+
+**Features**:
+- Next.js + Fluent UI v9 Dashboard
+- Hosted on Azure Static Web Apps (Free/Standard)
+- Real-time updates via Web PubSub (future)
 
 **PowerShell**:
 ```powershell

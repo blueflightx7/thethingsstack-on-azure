@@ -88,6 +88,10 @@ thethingsstack-on-azure.parameters.json
 **/bicep-build/
 **/arm-templates/
 
+# Azure Functions (integration) - generated dependencies (do not commit)
+deployments/integration/function/bin/
+deployments/integration/function/.deps_publish/
+
 # Terraform state files (if ever used)
 *.tfstate
 *.tfstate.*
@@ -272,6 +276,13 @@ backups/
 # ====================
 # PROJECT-SPECIFIC EXCLUSIONS
 # ====================
+# Dashboard artifacts
+dashboard/out/
+dashboard/.next/
+dashboard/node_modules/
+dashboard/.env.local
+dashboard/.env.production
+
 # Legacy/test files that contain real secrets (from security audit)
 config/docker-compose.yml
 config/docker-compose-enhanced.yml
@@ -352,3 +363,8 @@ __azurite_db*__.json
 # - Fill in real values locally (ignored by git)
 # - Or use Key Vault references and secure parameters
 # ============================================================================
+
+# .NET
+bin/
+obj/
+*.deb
