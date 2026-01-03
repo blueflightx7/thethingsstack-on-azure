@@ -116,12 +116,15 @@ const useStyles = makeStyles({
 });
 
 interface WeightHeroProps {
-  currentKg: number | null | undefined;
+  currentKg: number | null | undefined; // Always in kg
   change24h?: number | null;
   changeRateKgPerHour?: number | null;
-  recentValues?: number[]; // Last N values for sparkline
+  recentValues?: number[]; // Last N values for sparkline (in kg)
   label?: string;
+  unit?: 'lbs' | 'kg';
 }
+
+const KG_TO_LBS = 2.20462;
 
 export function WeightHero({
   currentKg,
@@ -129,8 +132,20 @@ export function WeightHero({
   changeRateKgPerHour,
   recentValues,
   label = 'Weight',
+  unit = 'lbs',
 }: WeightHeroProps) {
   const styles = useStyles();
+
+  // Convert to display unit
+  const displayValue = useMemo(() => {
+    if (currentKg == null) return null;
+    return unit === 'lbs' ? currentKg * KG_TO_LBS : currentKg;
+  }, [currentKg, unit]);
+
+  const displayChange = useMemo(() => {
+    if (change24h == null) return null;
+    return unit === 'lbs' ? change24h * KG_TO_LBS : change24h;
+  }, [change24h, unit]);
 
   const pattern = useMemo(() => 
     detectWeightPattern(currentKg, change24h, changeRateKgPerHour),
@@ -226,17 +241,17 @@ export function WeightHero({
 
       <div className={styles.valueContainer}>
         <span className={styles.value}>
-          {currentKg != null ? currentKg.toFixed(1) : '—'}
+          {displayValue != null ? displayValue.toFixed(1) : '—'}
         </span>
-        <span className={styles.unit}>kg</span>
+        <span className={styles.unit}>{unit}</span>
       </div>
 
-      {change24h != null && (
+      {displayChange != null && (
         <div className={styles.changeContainer}>
           <div className={changeClass}>
             <ChangeIcon />
             <Text size={300} weight="semibold">
-              {change24h > 0 ? '+' : ''}{change24h.toFixed(2)} kg
+              {displayChange > 0 ? '+' : ''}{displayChange.toFixed(2)} {unit}
             </Text>
           </div>
           <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>

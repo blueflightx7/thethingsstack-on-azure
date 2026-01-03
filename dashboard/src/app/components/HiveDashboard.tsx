@@ -9,9 +9,11 @@ import { Text, Title3 } from '@fluentui/react-text';
 import { makeStyles, shorthands } from '@griffel/react';
 import { tokens } from '@fluentui/react-theme';
 import { fetchJson, OverviewHive, OverviewResponse } from '../lib/api';
-import { ageLabel, formatMaybeNumber, freshnessKind } from '../lib/format';
+import { ageLabel, freshnessKind } from '../lib/format';
 import { HiveDetailPanel } from './HiveDetailPanel';
 import { ConnectionState } from './common/ConnectionStatus';
+import { HiveLocation } from './map/HiveMap';
+import { useUnitPreferences } from '../contexts/UnitPreferencesContext';
 
 const useStyles = makeStyles({
   layout: {
@@ -87,12 +89,29 @@ function resolvedLastTimestamp(h: OverviewHive): string | null {
   return (h.lastMeasurementAt ?? h.lastSeenAt ?? null) as string | null;
 }
 
-interface HiveDashboardProps {
-  onConnectionStateChange?: (state: ConnectionState, lastUpdated?: Date) => void;
+function getHiveStatus(h: OverviewHive): 'healthy' | 'warning' | 'critical' {
+  const last = resolvedLastTimestamp(h);
+  const kind = freshnessKind(last);
+  if (kind === 'critical') return 'critical';
+  if (kind === 'warning') return 'warning';
+  return 'healthy';
 }
 
-export function HiveDashboard({ onConnectionStateChange }: HiveDashboardProps) {
+interface HiveDashboardProps {
+  onConnectionStateChange?: (state: ConnectionState, lastUpdated?: Date) => void;
+  onHivesLoaded?: (hives: HiveLocation[]) => void;
+  selectedHiveId?: string | null;
+  onHiveSelect?: (hiveId: string | null) => void;
+}
+
+export function HiveDashboard({ 
+  onConnectionStateChange,
+  onHivesLoaded,
+  selectedHiveId: externalSelectedHive,
+  onHiveSelect,
+}: HiveDashboardProps) {
   const styles = useStyles();
+  const { formatTemp, formatWt, tempSymbol, wtSymbol } = useUnitPreferences();
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const router = useRouter();
@@ -102,6 +121,16 @@ export function HiveDashboard({ onConnectionStateChange }: HiveDashboardProps) {
   const hives = overview?.hives ?? [];
 
   const [selectedHive, setSelectedHive] = useState<string | null>(selectedFromUrl);
+
+  // Sync with external selection (from map)
+  useEffect(() => {
+    if (externalSelectedHive !== undefined) {
+      setSelectedHive(externalSelectedHive);
+      if (externalSelectedHive) {
+        router.replace(`/?hive=${encodeURIComponent(externalSelectedHive)}`);
+      }
+    }
+  }, [externalSelectedHive, router]);
 
   useEffect(() => {
     setSelectedHive(selectedFromUrl);
@@ -121,6 +150,23 @@ export function HiveDashboard({ onConnectionStateChange }: HiveDashboardProps) {
         if (!cancelled) {
           setOverview(json);
           notifyConnectionState('polling');
+          
+          // Convert to HiveLocation format and notify parent for map
+          if (onHivesLoaded && json.hives) {
+            const locations: HiveLocation[] = json.hives
+              .filter(h => h.location?.latitude != null && h.location?.longitude != null)
+              .map(h => ({
+                id: h.hiveIdentity || '',
+                name: h.hiveName || 'Unnamed Hive',
+                latitude: Number(h.location?.latitude),
+                longitude: Number(h.location?.longitude),
+                status: getHiveStatus(h),
+                lastSeen: resolvedLastTimestamp(h),
+                temperatureC: h.telemetry?.temperatureInner as number | null,
+                weightKg: h.telemetry?.weightKg as number | null,
+              }));
+            onHivesLoaded(locations);
+          }
         }
       } catch {
         if (!cancelled) {
@@ -136,7 +182,7 @@ export function HiveDashboard({ onConnectionStateChange }: HiveDashboardProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [notifyConnectionState, onHivesLoaded]);
 
   useEffect(() => {
     if (!overview?.hives?.length) return;
@@ -209,16 +255,16 @@ export function HiveDashboard({ onConnectionStateChange }: HiveDashboardProps) {
 
                     <div className={styles.metrics}>
                       <Text size={200} className={styles.tileMeta}>
-                        Inner °C: {formatMaybeNumber(h.telemetry?.temperatureInner as number | null | undefined, 1)}
+                        Inner: {formatTemp(h.telemetry?.temperatureInner as number | null | undefined)}
                       </Text>
                       <Text size={200} className={styles.tileMeta}>
-                        Outer °C: {formatMaybeNumber(h.telemetry?.temperatureOuter as number | null | undefined, 1)}
+                        Outer: {formatTemp(h.telemetry?.temperatureOuter as number | null | undefined)}
                       </Text>
                       <Text size={200} className={styles.tileMeta}>
-                        Humidity: {formatMaybeNumber(h.telemetry?.humidity as number | null | undefined, 1)}
+                        Humidity: {(h.telemetry?.humidity as number | null | undefined)?.toFixed(1) ?? '—'}%
                       </Text>
                       <Text size={200} className={styles.tileMeta}>
-                        Weight kg: {formatMaybeNumber(h.telemetry?.weightKg as number | null | undefined, 1)}
+                        Weight: {formatWt(h.telemetry?.weightKg as number | null | undefined)}
                       </Text>
                     </div>
                   </div>

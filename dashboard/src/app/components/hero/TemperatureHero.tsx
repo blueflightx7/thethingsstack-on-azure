@@ -94,11 +94,12 @@ const useStyles = makeStyles({
 });
 
 interface TemperatureHeroProps {
-  current: number | null | undefined;
+  current: number | null | undefined; // Always in Celsius
   type?: 'brood' | 'winter';
   trend?: number | null; // Change per hour
   label?: string;
   showGauge?: boolean;
+  unit?: 'fahrenheit' | 'celsius';
 }
 
 export function TemperatureHero({
@@ -107,6 +108,7 @@ export function TemperatureHero({
   trend,
   label = 'Temperature',
   showGauge = true,
+  unit = 'fahrenheit',
 }: TemperatureHeroProps) {
   const styles = useStyles();
   const thresholds = temperatureThresholds[type];
@@ -117,6 +119,12 @@ export function TemperatureHero({
   );
 
   const alertColor = alertColors[alertLevel];
+  
+  // Convert to display unit
+  const displayValue = useMemo(() => {
+    if (current == null) return null;
+    return unit === 'fahrenheit' ? (current * 9/5) + 32 : current;
+  }, [current, unit]);
 
   // Calculate gauge angles (semi-circle from -90 to 90 degrees)
   const gaugeData = useMemo(() => {
@@ -264,9 +272,9 @@ export function TemperatureHero({
 
       <div className={styles.valueContainer}>
         <span className={styles.value} style={{ color: alertColor }}>
-          {current != null ? current.toFixed(1) : '—'}
+          {displayValue != null ? displayValue.toFixed(1) : '—'}
         </span>
-        <span className={styles.unit}>°C</span>
+        <span className={styles.unit}>{unit === 'fahrenheit' ? '°F' : '°C'}</span>
       </div>
 
       <div className={styles.status} style={{ color: alertColor }}>
@@ -277,7 +285,7 @@ export function TemperatureHero({
       {trend != null && (
         <div className={`${styles.trend} ${trendClass}`}>
           <TrendIcon />
-          <span>{trend > 0 ? '+' : ''}{trend.toFixed(1)}°C/hr</span>
+          <span>{trend > 0 ? '+' : ''}{trend.toFixed(1)}°/hr</span>
         </div>
       )}
 

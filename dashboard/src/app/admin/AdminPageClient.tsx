@@ -9,6 +9,7 @@ import { makeStyles, shorthands } from '@griffel/react';
 import { tokens } from '@fluentui/react-theme';
 import { DashboardHeader } from '../components/DashboardHeader';
 import { fetchJson, HiveDetailResponse, OverviewResponse } from '../lib/api';
+import { UnitPreferencesProvider, useUnitPreferences } from '../contexts/UnitPreferencesContext';
 
 const useStyles = makeStyles({
   main: {
@@ -30,6 +31,12 @@ const useStyles = makeStyles({
     '@media (max-width: 1024px)': {
       gridTemplateColumns: '1fr',
     },
+  },
+  singleColumn: {
+    display: 'grid',
+    gridTemplateColumns: '1fr',
+    ...shorthands.gap('16px'),
+    marginTop: '16px',
   },
   card: {
     ...shorthands.padding('12px'),
@@ -71,12 +78,56 @@ const useStyles = makeStyles({
   meta: {
     color: tokens.colorNeutralForeground3,
   },
+  toggleGroup: {
+    display: 'flex',
+    ...shorthands.gap('8px'),
+    marginTop: '8px',
+  },
+  toggleButton: {
+    ...shorthands.padding('8px', '16px'),
+    borderRadius: tokens.borderRadiusMedium,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground1,
+    cursor: 'pointer',
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    transitionProperty: 'all',
+    transitionDuration: '0.15s',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  toggleButtonActive: {
+    backgroundColor: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
+    ...shorthands.borderColor(tokens.colorBrandBackground),
+    ':hover': {
+      backgroundColor: tokens.colorBrandBackgroundHover,
+    },
+  },
+  settingsRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    ...shorthands.padding('12px', '0'),
+    borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+  },
 });
 
 export default function AdminPageClient() {
+  return (
+    <UnitPreferencesProvider>
+      <AdminPageContent />
+    </UnitPreferencesProvider>
+  );
+}
+
+function AdminPageContent() {
   const styles = useStyles();
   const router = useRouter();
   const search = useSearchParams();
+  const { temperatureUnit, weightUnit, toggleTemperatureUnit, toggleWeightUnit } = useUnitPreferences();
 
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [detail, setDetail] = useState<HiveDetailResponse | null>(null);
@@ -242,6 +293,62 @@ export default function AdminPageClient() {
             <div className={styles.actions}>
               <Button appearance="secondary" disabled={saving} onClick={clearOverride}>Clear override</Button>
               <Button appearance="primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</Button>
+            </div>
+          </Card>
+        </div>
+
+        {/* Unit Preferences Section */}
+        <div className={styles.singleColumn}>
+          <Card className={styles.card}>
+            <Title3>Display Units</Title3>
+            <Text size={200} className={styles.meta}>
+              Configure how measurements are displayed on the dashboard. These preferences are saved locally.
+            </Text>
+
+            <div className={styles.settingsRow}>
+              <div>
+                <Text weight="semibold">Temperature</Text>
+                <Text size={200} className={styles.meta}>Choose between Fahrenheit and Celsius</Text>
+              </div>
+              <div className={styles.toggleGroup}>
+                <button
+                  className={`${styles.toggleButton} ${temperatureUnit === 'fahrenheit' ? styles.toggleButtonActive : ''}`}
+                  onClick={() => temperatureUnit !== 'fahrenheit' && toggleTemperatureUnit()}
+                  type="button"
+                >
+                  °F
+                </button>
+                <button
+                  className={`${styles.toggleButton} ${temperatureUnit === 'celsius' ? styles.toggleButtonActive : ''}`}
+                  onClick={() => temperatureUnit !== 'celsius' && toggleTemperatureUnit()}
+                  type="button"
+                >
+                  °C
+                </button>
+              </div>
+            </div>
+
+            <div className={styles.settingsRow}>
+              <div>
+                <Text weight="semibold">Weight</Text>
+                <Text size={200} className={styles.meta}>Choose between pounds and kilograms</Text>
+              </div>
+              <div className={styles.toggleGroup}>
+                <button
+                  className={`${styles.toggleButton} ${weightUnit === 'lbs' ? styles.toggleButtonActive : ''}`}
+                  onClick={() => weightUnit !== 'lbs' && toggleWeightUnit()}
+                  type="button"
+                >
+                  lbs
+                </button>
+                <button
+                  className={`${styles.toggleButton} ${weightUnit === 'kg' ? styles.toggleButtonActive : ''}`}
+                  onClick={() => weightUnit !== 'kg' && toggleWeightUnit()}
+                  type="button"
+                >
+                  kg
+                </button>
+              </div>
             </div>
           </Card>
         </div>

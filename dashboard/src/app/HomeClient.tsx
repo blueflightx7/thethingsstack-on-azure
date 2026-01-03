@@ -1,12 +1,15 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { DashboardHeader } from './components/DashboardHeader';
 import { OverviewStats } from './components/OverviewStats';
 import { HiveDashboard } from './components/HiveDashboard';
 import { ArchitectureDiagram } from './components/ArchitectureDiagram';
+import { AboutPage } from './components/AboutPage';
+import { HiveMap, HiveLocation } from './components/map/HiveMap';
 import { Footer } from './components/common/Footer';
 import { KioskModeProvider, useKioskMode } from './components/kiosk/KioskModeProvider';
+import { UnitPreferencesProvider } from './contexts/UnitPreferencesContext';
 import { makeStyles, shorthands, mergeClasses } from '@griffel/react';
 import { tokens } from '@fluentui/react-theme';
 import { ConnectionState } from './components/common/ConnectionStatus';
@@ -30,20 +33,30 @@ const useStyles = makeStyles({
   },
   fullWidth: {
     maxWidth: 'none',
-    ...shorthands.padding('0'),
+    ...shorthands.padding('24px', '32px'),
   },
   kioskMode: {
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  mapSection: {
+    marginBottom: '24px',
+  },
+  sectionTitle: {
+    marginBottom: '16px',
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase500,
+  },
 });
 
-type Section = 'home' | 'architecture';
+export type Section = 'dashboard' | 'map' | 'architecture' | 'about';
 
 function HomeContent() {
   const styles = useStyles();
-  const [activeSection, setActiveSection] = useState<Section>('home');
+  const [activeSection, setActiveSection] = useState<Section>('dashboard');
   const [connectionState, setConnectionState] = useState<ConnectionState>('polling');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(new Date());
+  const [hiveLocations, setHiveLocations] = useState<HiveLocation[]>([]);
+  const [selectedHiveId, setSelectedHiveId] = useState<string | null>(null);
   
   // Try to use kiosk mode, but handle case where provider isn't available
   let kioskMode: ReturnType<typeof useKioskMode> | null = null;
@@ -62,6 +75,19 @@ function HomeContent() {
     if (updated) setLastUpdated(updated);
   }, []);
 
+  // Callback to receive hive data from HiveDashboard for the map
+  const handleHivesLoaded = useCallback((hives: HiveLocation[]) => {
+    setHiveLocations(hives);
+  }, []);
+
+  const handleMapHiveSelect = useCallback((hiveId: string) => {
+    setSelectedHiveId(hiveId);
+    setActiveSection('dashboard');
+  }, []);
+
+  // Determine if content should be full-width
+  const isFullWidth = activeSection === 'architecture' || activeSection === 'about';
+
   return (
     <div className={mergeClasses(
       styles.main,
@@ -77,15 +103,38 @@ function HomeContent() {
       
       <div className={mergeClasses(
         styles.content,
-        activeSection === 'architecture' && styles.fullWidth
+        isFullWidth && styles.fullWidth
       )}>
-        {activeSection === 'home' ? (
+        {activeSection === 'dashboard' && (
           <>
             <OverviewStats />
-            <HiveDashboard onConnectionStateChange={handleConnectionStateChange} />
+            <HiveDashboard 
+              onConnectionStateChange={handleConnectionStateChange}
+              onHivesLoaded={handleHivesLoaded}
+              selectedHiveId={selectedHiveId}
+              onHiveSelect={setSelectedHiveId}
+            />
           </>
-        ) : (
+        )}
+        
+        {activeSection === 'map' && (
+          <div className={styles.mapSection}>
+            <h2 className={styles.sectionTitle}>🗺️ Hive Locations</h2>
+            <HiveMap 
+              hives={hiveLocations}
+              selectedHiveId={selectedHiveId}
+              onHiveSelect={handleMapHiveSelect}
+              height="600px"
+            />
+          </div>
+        )}
+        
+        {activeSection === 'architecture' && (
           <ArchitectureDiagram />
+        )}
+        
+        {activeSection === 'about' && (
+          <AboutPage />
         )}
       </div>
       
@@ -96,8 +145,10 @@ function HomeContent() {
 
 export default function HomeClient() {
   return (
-    <KioskModeProvider>
-      <HomeContent />
-    </KioskModeProvider>
+    <UnitPreferencesProvider>
+      <KioskModeProvider>
+        <HomeContent />
+      </KioskModeProvider>
+    </UnitPreferencesProvider>
   );
 }

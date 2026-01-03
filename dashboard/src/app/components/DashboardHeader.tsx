@@ -25,6 +25,8 @@ import {
   Home20Regular,
   Organization20Regular,
   FullScreenMaximize20Regular,
+  Map20Regular,
+  Info20Regular,
 } from '@fluentui/react-icons';
 import { tokens } from '@fluentui/react-theme';
 import { fetchJson, AuthMeResponse } from '../lib/api';
@@ -125,16 +127,18 @@ const useStyles = makeStyles({
   },
 });
 
+type Section = 'dashboard' | 'map' | 'architecture' | 'about';
+
 export interface DashboardHeaderProps {
-  activeSection?: 'home' | 'architecture';
-  onSectionChange?: (section: 'home' | 'architecture') => void;
+  activeSection?: Section;
+  onSectionChange?: (section: Section) => void;
   connectionState?: ConnectionState;
   lastUpdated?: Date | null;
   onKioskToggle?: () => void;
 }
 
 export const DashboardHeader = ({
-  activeSection = 'home',
+  activeSection = 'dashboard',
   onSectionChange,
   connectionState = 'polling',
   lastUpdated,
@@ -207,11 +211,22 @@ export const DashboardHeader = ({
             icon={<Home20Regular />}
             className={mergeClasses(
               styles.navButton,
-              activeSection === 'home' && styles.navButtonActive
+              activeSection === 'dashboard' && styles.navButtonActive
             )}
-            onClick={() => onSectionChange?.('home')}
+            onClick={() => onSectionChange?.('dashboard')}
           >
             Dashboard
+          </Button>
+          <Button
+            appearance="subtle"
+            icon={<Map20Regular />}
+            className={mergeClasses(
+              styles.navButton,
+              activeSection === 'map' && styles.navButtonActive
+            )}
+            onClick={() => onSectionChange?.('map')}
+          >
+            Map
           </Button>
           <Button
             appearance="subtle"
@@ -223,6 +238,17 @@ export const DashboardHeader = ({
             onClick={() => onSectionChange?.('architecture')}
           >
             Architecture
+          </Button>
+          <Button
+            appearance="subtle"
+            icon={<Info20Regular />}
+            className={mergeClasses(
+              styles.navButton,
+              activeSection === 'about' && styles.navButtonActive
+            )}
+            onClick={() => onSectionChange?.('about')}
+          >
+            About
           </Button>
         </nav>
       </div>

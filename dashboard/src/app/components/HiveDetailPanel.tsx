@@ -25,6 +25,7 @@ import { ageLabel, formatMaybeInt, formatMaybeNumber, formatTimestamp } from '..
 import { TemperatureHero } from './hero/TemperatureHero';
 import { WeightHero } from './hero/WeightHero';
 import { HiveNameEditor } from './common/HiveNameEditor';
+import { useUnitPreferences } from '../contexts/UnitPreferencesContext';
 
 const useStyles = makeStyles({
   card: {
@@ -196,6 +197,7 @@ function useHiveRealtimeInvalidation(enabled: boolean, onInvalidate: () => void)
 
 export function HiveDetailPanel({ hiveIdentity }: { hiveIdentity: string | null }) {
   const styles = useStyles();
+  const { formatTemp, formatWt, tempSymbol, wtSymbol, temperatureUnit, weightUnit } = useUnitPreferences();
 
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<HiveDetailResponse | null>(null);
@@ -304,14 +306,17 @@ export function HiveDetailPanel({ hiveIdentity }: { hiveIdentity: string | null 
           current={detail?.telemetry?.temperatureInner as number | null | undefined}
           label="Brood Chamber"
           type="brood"
+          unit={temperatureUnit}
         />
         <TemperatureHero
           current={detail?.telemetry?.temperatureOuter as number | null | undefined}
           label="Ambient"
+          unit={temperatureUnit}
         />
         <WeightHero
           currentKg={detail?.telemetry?.weightKg as number | null | undefined}
           recentValues={chartData.map(d => d.weightKg).filter((v): v is number => v != null)}
+          unit={weightUnit}
         />
       </div>
 
@@ -345,7 +350,7 @@ export function HiveDetailPanel({ hiveIdentity }: { hiveIdentity: string | null 
 
       <div className={styles.chartGrid}>
         <div className={styles.chartCard}>
-          <Text className={styles.chartTitle}>Temperature History (°C)</Text>
+          <Text className={styles.chartTitle}>Temperature History ({tempSymbol})</Text>
           <ResponsiveContainer width="100%" height="85%">
             <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
               <CartesianGrid stroke={tokens.colorNeutralStroke2} strokeDasharray="3 3" />
@@ -373,7 +378,7 @@ export function HiveDetailPanel({ hiveIdentity }: { hiveIdentity: string | null 
         </div>
 
         <div className={styles.chartCard}>
-          <Text className={styles.chartTitle}>Weight History (kg)</Text>
+          <Text className={styles.chartTitle}>Weight History ({wtSymbol})</Text>
           <ResponsiveContainer width="100%" height="85%">
             <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
               <CartesianGrid stroke={tokens.colorNeutralStroke2} strokeDasharray="3 3" />
