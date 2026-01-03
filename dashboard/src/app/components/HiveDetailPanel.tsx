@@ -22,10 +22,13 @@ import {
   HiveSeriesResponse,
 } from '../lib/api';
 import { ageLabel, formatMaybeInt, formatMaybeNumber, formatTimestamp } from '../lib/format';
+import { TemperatureHero } from './hero/TemperatureHero';
+import { WeightHero } from './hero/WeightHero';
+import { HiveNameEditor } from './common/HiveNameEditor';
 
 const useStyles = makeStyles({
   card: {
-    ...shorthands.padding('12px'),
+    ...shorthands.padding('16px'),
     backgroundColor: tokens.colorNeutralBackground1,
     border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
     boxShadow: tokens.shadow8,
@@ -36,38 +39,85 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     ...shorthands.gap('12px'),
-    ...shorthands.padding('4px', '4px', '12px'),
+    ...shorthands.padding('4px', '4px', '16px'),
+    borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    marginBottom: '16px',
   },
   meta: {
     color: tokens.colorNeutralForeground3,
   },
-  grid: {
+  heroSection: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    ...shorthands.gap('16px'),
+    marginBottom: '24px',
+  },
+  metricsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(4, 1fr)',
     ...shorthands.gap('8px', '16px'),
-    ...shorthands.padding('8px', '4px'),
+    ...shorthands.padding('12px'),
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    marginBottom: '16px',
     '@media (max-width: 1280px)': {
       gridTemplateColumns: 'repeat(2, 1fr)',
     },
+  },
+  metricItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap('2px'),
+  },
+  metricLabel: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase100,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  metricValue: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
   },
   chartGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, 1fr)',
     ...shorthands.gap('12px'),
-    marginTop: '12px',
     '@media (max-width: 1280px)': {
       gridTemplateColumns: '1fr',
     },
   },
   chartCard: {
-    ...shorthands.padding('10px'),
+    ...shorthands.padding('12px'),
     border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
     backgroundColor: tokens.colorNeutralBackground1,
     boxShadow: tokens.shadow2,
-    height: '260px',
+    borderRadius: tokens.borderRadiusMedium,
+    height: '240px',
   },
   chartTitle: {
-    marginBottom: '6px',
+    marginBottom: '8px',
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  statusBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('6px'),
+    ...shorthands.padding('4px', '8px'),
+    borderRadius: tokens.borderRadiusMedium,
+    fontSize: tokens.fontSizeBase200,
+  },
+  statusLive: {
+    backgroundColor: '#E6F4EA',
+    color: '#107C10',
+  },
+  statusLoading: {
+    backgroundColor: '#FFF4CE',
+    color: '#6B5900',
+  },
+  statusError: {
+    backgroundColor: '#FDE7E9',
+    color: '#A80000',
   },
 });
 
@@ -214,94 +264,130 @@ export function HiveDetailPanel({ hiveIdentity }: { hiveIdentity: string | null 
     : '—';
   const locationLabel = detail?.location?.label || coords;
 
+  // Status badge helper
+  const getStatusBadgeClass = () => {
+    if (error) return `${styles.statusBadge} ${styles.statusError}`;
+    if (loading) return `${styles.statusBadge} ${styles.statusLoading}`;
+    return `${styles.statusBadge} ${styles.statusLive}`;
+  };
+
   return (
     <Card className={styles.card}>
       <div className={styles.header}>
         <div>
-          <Title3>{detail?.hiveName ?? 'Hive'}</Title3>
+          <HiveNameEditor
+            deviceId={hiveIdentity ?? ''}
+            currentName={detail?.hiveName}
+            onSave={(newName) => {
+              // Trigger a refresh when name changes
+              if (detail) {
+                setDetail({ ...detail, hiveName: newName });
+              }
+            }}
+          />
           <Text size={200} className={styles.meta}>
-            Location: {locationLabel} • Last: {ageLabel(last)} • {formatTimestamp(last)}
+            📍 {locationLabel} • Last seen: {ageLabel(last)}
           </Text>
         </div>
-        <Text size={200} className={styles.meta}>{loading ? 'Refreshing…' : (error ? 'Error' : 'Live')}</Text>
+        <span className={getStatusBadgeClass()}>
+          {loading ? '◐ Refreshing…' : (error ? '✕ Error' : '● Live')}
+        </span>
       </div>
 
       {error ? (
         <Text size={200} className={styles.meta}>{error}</Text>
       ) : null}
 
-      <div className={styles.grid}>
-        <Text size={200}>
-          Inner °C: {formatMaybeNumber(detail?.telemetry?.temperatureInner as number | null | undefined, 1)}
-        </Text>
-        <Text size={200}>
-          Outer °C: {formatMaybeNumber(detail?.telemetry?.temperatureOuter as number | null | undefined, 1)}
-        </Text>
-        <Text size={200}>
-          Humidity: {formatMaybeNumber(detail?.telemetry?.humidity as number | null | undefined, 1)}
-        </Text>
-        <Text size={200}>
-          Weight kg: {formatMaybeNumber(detail?.telemetry?.weightKg as number | null | undefined, 1)}
-        </Text>
-        <Text size={200}>
-          Battery: {formatMaybeInt(detail?.telemetry?.batteryPercent as number | null | undefined)}%
-        </Text>
-        <Text size={200}>
-          Battery V: {formatMaybeNumber(detail?.telemetry?.batteryVoltage as number | null | undefined, 2)}
-        </Text>
-        <Text size={200}>
-          Sound energy: {formatMaybeInt(detail?.telemetry?.soundEnergyTotal as number | null | undefined)}
-        </Text>
-        <Text size={200}>
-          Sound band: {detail?.telemetry?.soundDominantBinRange ?? '—'}
-        </Text>
+      {/* Hero Visualizations */}
+      <div className={styles.heroSection}>
+        <TemperatureHero
+          current={detail?.telemetry?.temperatureInner as number | null | undefined}
+          label="Brood Chamber"
+          type="brood"
+        />
+        <TemperatureHero
+          current={detail?.telemetry?.temperatureOuter as number | null | undefined}
+          label="Ambient"
+        />
+        <WeightHero
+          currentKg={detail?.telemetry?.weightKg as number | null | undefined}
+          recentValues={chartData.map(d => d.weightKg).filter((v): v is number => v != null)}
+        />
+      </div>
+
+      {/* Secondary Metrics Grid */}
+      <div className={styles.metricsGrid}>
+        <div className={styles.metricItem}>
+          <span className={styles.metricLabel}>Humidity</span>
+          <span className={styles.metricValue}>
+            {formatMaybeNumber(detail?.telemetry?.humidity as number | null | undefined, 1)}%
+          </span>
+        </div>
+        <div className={styles.metricItem}>
+          <span className={styles.metricLabel}>Battery</span>
+          <span className={styles.metricValue}>
+            {formatMaybeInt(detail?.telemetry?.batteryPercent as number | null | undefined)}%
+          </span>
+        </div>
+        <div className={styles.metricItem}>
+          <span className={styles.metricLabel}>Battery Voltage</span>
+          <span className={styles.metricValue}>
+            {formatMaybeNumber(detail?.telemetry?.batteryVoltage as number | null | undefined, 2)}V
+          </span>
+        </div>
+        <div className={styles.metricItem}>
+          <span className={styles.metricLabel}>Sound Energy</span>
+          <span className={styles.metricValue}>
+            {formatMaybeInt(detail?.telemetry?.soundEnergyTotal as number | null | undefined)}
+          </span>
+        </div>
       </div>
 
       <div className={styles.chartGrid}>
         <div className={styles.chartCard}>
-          <Text className={styles.chartTitle}>Temperature (°C)</Text>
-          <ResponsiveContainer width="100%" height="100%">
+          <Text className={styles.chartTitle}>Temperature History (°C)</Text>
+          <ResponsiveContainer width="100%" height="85%">
             <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
               <CartesianGrid stroke={tokens.colorNeutralStroke2} strokeDasharray="3 3" />
               <XAxis dataKey="timestamp" tickFormatter={formatTimeTick} minTickGap={24} />
               <YAxis width={40} />
               <Tooltip labelFormatter={(v) => formatTimestamp(String(v))} />
               <Legend />
-              <Line type="monotone" dataKey="temperatureInner" name="Inner" stroke={tokens.colorBrandForeground1} dot={false} />
-              <Line type="monotone" dataKey="temperatureOuter" name="Outer" stroke={tokens.colorPaletteDarkOrangeForeground1} dot={false} />
+              <Line type="monotone" dataKey="temperatureInner" name="Inner" stroke="#0078D4" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="temperatureOuter" name="Outer" stroke="#E87400" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
 
         <div className={styles.chartCard}>
-          <Text className={styles.chartTitle}>Humidity</Text>
-          <ResponsiveContainer width="100%" height="100%">
+          <Text className={styles.chartTitle}>Humidity History (%)</Text>
+          <ResponsiveContainer width="100%" height="85%">
             <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
               <CartesianGrid stroke={tokens.colorNeutralStroke2} strokeDasharray="3 3" />
               <XAxis dataKey="timestamp" tickFormatter={formatTimeTick} minTickGap={24} />
               <YAxis width={40} />
               <Tooltip labelFormatter={(v) => formatTimestamp(String(v))} />
-              <Line type="monotone" dataKey="humidity" name="Humidity" stroke={tokens.colorPaletteLightGreenForeground1} dot={false} />
+              <Line type="monotone" dataKey="humidity" name="Humidity" stroke="#107C10" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
 
         <div className={styles.chartCard}>
-          <Text className={styles.chartTitle}>Weight (kg)</Text>
-          <ResponsiveContainer width="100%" height="100%">
+          <Text className={styles.chartTitle}>Weight History (kg)</Text>
+          <ResponsiveContainer width="100%" height="85%">
             <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
               <CartesianGrid stroke={tokens.colorNeutralStroke2} strokeDasharray="3 3" />
               <XAxis dataKey="timestamp" tickFormatter={formatTimeTick} minTickGap={24} />
               <YAxis width={40} />
               <Tooltip labelFormatter={(v) => formatTimestamp(String(v))} />
-              <Line type="monotone" dataKey="weightKg" name="Weight" stroke={tokens.colorPaletteBlueForeground2} dot={false} />
+              <Line type="monotone" dataKey="weightKg" name="Weight" stroke="#0078D4" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
 
         <div className={styles.chartCard}>
-          <Text className={styles.chartTitle}>Sound energy</Text>
-          <ResponsiveContainer width="100%" height="100%">
+          <Text className={styles.chartTitle}>Sound Energy History</Text>
+          <ResponsiveContainer width="100%" height="85%">
             <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
               <CartesianGrid stroke={tokens.colorNeutralStroke2} strokeDasharray="3 3" />
               <XAxis dataKey="timestamp" tickFormatter={formatTimeTick} minTickGap={24} />
