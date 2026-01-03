@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card } from '@fluentui/react-card';
 import { Badge } from '@fluentui/react-badge';
@@ -11,6 +11,7 @@ import { tokens } from '@fluentui/react-theme';
 import { fetchJson, OverviewHive, OverviewResponse } from '../lib/api';
 import { ageLabel, formatMaybeNumber, freshnessKind } from '../lib/format';
 import { HiveDetailPanel } from './HiveDetailPanel';
+import { ConnectionState } from './common/ConnectionStatus';
 
 const useStyles = makeStyles({
   layout: {
@@ -86,7 +87,11 @@ function resolvedLastTimestamp(h: OverviewHive): string | null {
   return (h.lastMeasurementAt ?? h.lastSeenAt ?? null) as string | null;
 }
 
-export function HiveDashboard() {
+interface HiveDashboardProps {
+  onConnectionStateChange?: (state: ConnectionState, lastUpdated?: Date) => void;
+}
+
+export function HiveDashboard({ onConnectionStateChange }: HiveDashboardProps) {
   const styles = useStyles();
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
@@ -102,15 +107,26 @@ export function HiveDashboard() {
     setSelectedHive(selectedFromUrl);
   }, [selectedFromUrl]);
 
+  // Notify parent of connection state changes
+  const notifyConnectionState = useCallback((state: ConnectionState) => {
+    onConnectionStateChange?.(state, new Date());
+  }, [onConnectionStateChange]);
+
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
         const json = await fetchJson<OverviewResponse>('/api/overview');
-        if (!cancelled) setOverview(json);
+        if (!cancelled) {
+          setOverview(json);
+          notifyConnectionState('polling');
+        }
       } catch {
-        if (!cancelled) setOverview(null);
+        if (!cancelled) {
+          setOverview(null);
+          notifyConnectionState('offline');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
