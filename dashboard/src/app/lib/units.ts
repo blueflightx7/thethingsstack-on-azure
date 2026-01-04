@@ -4,7 +4,7 @@
  * Unit conversion utilities for the beehive dashboard.
  * 
  * Temperature: Data stored in Celsius, display in F or C
- * Weight: Data stored in centigrams (cg), display in lbs or kg
+ * Weight: Data stored in milligrams (mg), display in lbs or kg
  */
 
 // ============ Temperature ============
@@ -47,11 +47,11 @@ export function getTemperatureSymbol(unit: TemperatureUnit): string {
 export type WeightUnit = 'lbs' | 'kg';
 
 // Conversion constants
-const CENTIGRAMS_PER_KG = 100000; // 100,000 cg = 1 kg
+const MILLIGRAMS_PER_KG = 1000000; // 1,000,000 mg = 1 kg
 const LBS_PER_KG = 2.20462;
 
-export function centigramsToKg(centigrams: number): number {
-  return centigrams / CENTIGRAMS_PER_KG;
+export function milligramsToKg(milligrams: number): number {
+  return milligrams / MILLIGRAMS_PER_KG;
 }
 
 export function kgToLbs(kg: number): number {
@@ -62,14 +62,14 @@ export function lbsToKg(lbs: number): number {
   return lbs / LBS_PER_KG;
 }
 
-export function centigramsToLbs(centigrams: number): number {
-  return kgToLbs(centigramsToKg(centigrams));
+export function milligramsToLbs(milligrams: number): number {
+  return kgToLbs(milligramsToKg(milligrams));
 }
 
 /**
  * Format weight for display.
  * Input is assumed to be in kg (as that's what comes from the API after initial conversion).
- * If the API returns centigrams, convert first with centigramsToKg().
+ * If the API returns milligrams, convert first with milligramsToKg().
  */
 export function formatWeight(
   kg: number | null | undefined,

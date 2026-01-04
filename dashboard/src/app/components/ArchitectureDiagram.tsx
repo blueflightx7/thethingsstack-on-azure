@@ -26,15 +26,28 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
     boxShadow: tokens.shadow8,
+    borderRadius: tokens.borderRadiusLarge,
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: '24px',
+    flexWrap: 'wrap',
+    ...shorthands.gap('16px'),
+  },
+  headerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('12px'),
+  },
+  headerIcon: {
+    fontSize: '32px',
   },
   subtitle: {
     color: tokens.colorNeutralForeground3,
+    marginTop: '4px',
+    display: 'block',
   },
   diagramContainer: {
     display: 'flex',
@@ -45,6 +58,42 @@ const useStyles = makeStyles({
   svg: {
     maxWidth: '100%',
     height: 'auto',
+  },
+  detailCard: {
+    marginTop: '16px',
+    ...shorthands.padding('16px'),
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  detailHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '12px',
+  },
+  detailTitle: {
+    fontWeight: 600,
+    fontSize: tokens.fontSizeBase400,
+    color: tokens.colorNeutralForeground1,
+  },
+  detailTech: {
+    color: '#0078D4',
+    fontSize: tokens.fontSizeBase200,
+    marginBottom: '8px',
+  },
+  detailDescription: {
+    color: tokens.colorNeutralForeground2,
+    marginBottom: '12px',
+    lineHeight: 1.5,
+  },
+  detailList: {
+    margin: 0,
+    paddingLeft: '20px',
+    '& li': {
+      marginBottom: '4px',
+      color: tokens.colorNeutralForeground2,
+      fontSize: tokens.fontSizeBase200,
+    },
   },
 });
 
@@ -316,14 +365,17 @@ export const ArchitectureDiagram = () => {
     <div className={styles.container}>
       <Card className={styles.card}>
         <div className={styles.header}>
-          <div>
-            <Title2>System Architecture</Title2>
-            <Text className={styles.subtitle}>
-              Azure IoT Beehive Monitoring Platform
-            </Text>
+          <div className={styles.headerLeft}>
+            <span className={styles.headerIcon}>🏗️</span>
+            <div>
+              <Title2>System Architecture</Title2>
+              <Text className={styles.subtitle}>
+                Azure IoT Beehive Monitoring Platform
+              </Text>
+            </div>
           </div>
           <Text size={200} className={styles.subtitle}>
-            Hover over components for details
+            Click on components for details
           </Text>
         </div>
 
@@ -334,24 +386,19 @@ export const ArchitectureDiagram = () => {
             viewBox="0 0 800 600"
             className={styles.svg}
           >
-            {/* Background grid */}
-            <defs>
-              <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#F3F2F1" strokeWidth="0.5"/>
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#grid)" />
+            {/* Clean background - no grid */}
+            <rect width="100%" height="100%" fill="#FAFAFA" />
 
             {/* Section labels */}
-            <text x="400" y="30" textAnchor="middle" fill="#605E5C" fontSize={12} fontFamily="Segoe UI, sans-serif">
+            <text x="400" y="30" textAnchor="middle" fill="#605E5C" fontSize={13} fontWeight={600} fontFamily="Segoe UI, sans-serif">
               Edge / Device Layer
             </text>
-            <text x="400" y="180" textAnchor="middle" fill="#605E5C" fontSize={12} fontFamily="Segoe UI, sans-serif">
-              Azure Cloud
+            <text x="400" y="180" textAnchor="middle" fill="#605E5C" fontSize={13} fontWeight={600} fontFamily="Segoe UI, sans-serif">
+              Azure Cloud Platform
             </text>
 
             {/* Divider line */}
-            <line x1="50" y1="140" x2="750" y2="140" stroke="#E1DFDD" strokeWidth="1" strokeDasharray="4,4" />
+            <line x1="50" y1="140" x2="750" y2="140" stroke="#E1DFDD" strokeWidth="2" strokeDasharray="8,4" />
 
             {/* BEEP Base Sensor */}
             <ComponentBox
@@ -428,7 +475,7 @@ export const ArchitectureDiagram = () => {
 
             {/* Azure branding */}
             <g transform="translate(680, 560)">
-              <text fill="#0078D4" fontSize={11} fontWeight={600} fontFamily="Segoe UI, sans-serif">
+              <text fill="#0078D4" fontSize={12} fontWeight={600} fontFamily="Segoe UI, sans-serif">
                 Powered by Azure
               </text>
             </g>
@@ -436,21 +483,25 @@ export const ArchitectureDiagram = () => {
         </div>
 
         {selectedComponent && componentData[selectedComponent] && (
-          <Card style={{ marginTop: '16px', padding: '16px', backgroundColor: '#F3F2F1' }}>
-            <Text weight="semibold" size={400}>{componentData[selectedComponent].name}</Text>
-            <Text block style={{ color: '#0078D4', marginBottom: '8px' }}>
-              {componentData[selectedComponent].technology}
-            </Text>
-            <Text block>{componentData[selectedComponent].description}</Text>
-            <div style={{ marginTop: '12px' }}>
+          <div className={styles.detailCard}>
+            <div className={styles.detailHeader}>
+              <div>
+                <Text className={styles.detailTitle}>{componentData[selectedComponent].name}</Text>
+                <Text className={styles.detailTech} block>
+                  {componentData[selectedComponent].technology}
+                </Text>
+              </div>
+            </div>
+            <Text className={styles.detailDescription}>{componentData[selectedComponent].description}</Text>
+            <div>
               <Text weight="semibold" size={200}>Capabilities:</Text>
-              <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px' }}>
+              <ul className={styles.detailList}>
                 {componentData[selectedComponent].details.map((detail, i) => (
-                  <li key={i}><Text size={200}>{detail}</Text></li>
+                  <li key={i}>{detail}</li>
                 ))}
               </ul>
             </div>
-          </Card>
+          </div>
         )}
       </Card>
     </div>
