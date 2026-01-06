@@ -117,38 +117,42 @@ function Assert-AzLogin {
 }
 
 # ============================================================================
-# Component: ProcessToSQL Function (Message Ingestion)
+# Component: ProcessToSQL Function (Message Ingestion) - .NET 8 Isolated Worker
 # ============================================================================
 
 function Update-ProcessToSqlFunction {
-    Write-Banner "Updating ProcessToSQL Function"
+    Write-Banner "Updating ProcessToSQL Function (.NET 8 Isolated Worker)"
     
     $funcDir = Join-Path $PSScriptRoot "integration\function"
+    $publishDir = Join-Path $funcDir "publish"
     $zipPath = Join-Path $PSScriptRoot "integration\function.zip"
-    $prepDeps = Join-Path $funcDir "prepare-deps.ps1"
+    $projectFile = Join-Path $funcDir "TtsIntegration.csproj"
 
-    # Step 1: Prepare dependencies
-    Write-Step 1 4 "Preparing dependencies..."
-    if (Test-Path $prepDeps) {
-        Push-Location (Split-Path $prepDeps -Parent)
-        try {
-            & $prepDeps
-            if ($LASTEXITCODE -ne 0) {
-                Write-Failure "prepare-deps.ps1 failed!"
-                return $false
-            }
+    # Verify project file exists
+    if (-not (Test-Path $projectFile)) {
+        Write-Failure "Project file not found: $projectFile"
+        return $false
+    }
+
+    # Step 1: Build .NET 8 project
+    Write-Step 1 4 "Building .NET 8 project..."
+    Push-Location $funcDir
+    try {
+        dotnet publish TtsIntegration.csproj -c Release -o $publishDir --nologo 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Failure "dotnet publish failed!"
+            return $false
         }
-        finally {
-            Pop-Location
-        }
-    } else {
-        Write-Host "   WARNING: prepare-deps.ps1 not found, skipping..." -ForegroundColor Yellow
+        Write-Host "   Build successful" -ForegroundColor Gray
+    }
+    finally {
+        Pop-Location
     }
 
     # Step 2: Create ZIP package
     Write-Step 2 4 "Creating deployment package..."
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-    Compress-Archive -Path "$funcDir\*" -DestinationPath $zipPath
+    Compress-Archive -Path "$publishDir\*" -DestinationPath $zipPath
     $zipSize = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
     Write-Host "   Package: function.zip ($zipSize MB)" -ForegroundColor Gray
 
@@ -163,6 +167,7 @@ function Update-ProcessToSqlFunction {
     if ($LASTEXITCODE -ne 0) {
         Write-Failure "Deployment failed!"
         Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        Remove-Item $publishDir -Recurse -Force -ErrorAction SilentlyContinue
         return $false
     }
 
@@ -170,7 +175,10 @@ function Update-ProcessToSqlFunction {
     Write-Step 4 4 "Restarting Function App..."
     az functionapp restart --resource-group $ResourceGroupName --name $IntegrationFunctionAppName --output none
 
+    # Cleanup
     Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+    Remove-Item $publishDir -Recurse -Force -ErrorAction SilentlyContinue
+    
     Write-Success "ProcessToSQL Function updated!"
     Write-Host ""
     Write-Host "   Monitor logs:" -ForegroundColor Gray
