@@ -93,7 +93,7 @@ export function Footer() {
         <div className={styles.divider} />
         
         <Link
-          href="https://github.com/kartben/thethingsstack-on-azure"
+          href="https://github.com/blueflightx7/thethingsstack-on-azure"
           target="_blank"
           rel="noopener noreferrer"
           className={styles.githubLink}

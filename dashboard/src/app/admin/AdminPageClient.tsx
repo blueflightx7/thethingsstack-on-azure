@@ -642,7 +642,7 @@ function AdminPageContent() {
               <a href="https://www.thethingsindustries.com/docs/" target="_blank" rel="noopener noreferrer" className={styles.link}>
                 📡 TTS Docs
               </a>
-              <a href="https://github.com/kartben/thethingsstack-on-azure" target="_blank" rel="noopener noreferrer" className={styles.link}>
+              <a href="https://github.com/blueflightx7/thethingsstack-on-azure" target="_blank" rel="noopener noreferrer" className={styles.link}>
                 💻 GitHub
               </a>
             </div>

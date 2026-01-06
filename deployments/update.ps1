@@ -341,12 +341,29 @@ function Update-SqlSchema {
 
     Write-Step 2 2 "Applying schema..."
     
-    # Try sqlcmd CLI first (more commonly available)
+    # Try Invoke-Sqlcmd first (PowerShell SqlServer module - preferred)
+    if (Get-Command Invoke-Sqlcmd -ErrorAction SilentlyContinue) {
+        Write-Host "   Using Invoke-Sqlcmd..." -ForegroundColor Gray
+        try {
+            # Use -ErrorAction Stop and explicit timeouts, no -Verbose to avoid hanging
+            Invoke-Sqlcmd -ServerInstance $serverFqdn -Database $SqlDatabaseName `
+                -Username $SqlUsername -Password $script:SqlPassword `
+                -InputFile $schemaFile -TrustServerCertificate `
+                -ConnectionTimeout 30 -QueryTimeout 120 -ErrorAction Stop
+            Write-Success "SQL Schema applied successfully!"
+            return $true
+        }
+        catch {
+            Write-Host "   Invoke-Sqlcmd failed: $_" -ForegroundColor Yellow
+        }
+    }
+
+    # Try sqlcmd CLI as fallback
     if (Get-Command sqlcmd -ErrorAction SilentlyContinue) {
         Write-Host "   Using sqlcmd CLI..." -ForegroundColor Gray
         try {
-            # -l 30 = 30 second login timeout, -t 60 = 60 second query timeout
-            $output = & sqlcmd -S $serverFqdn -d $SqlDatabaseName -U $SqlUsername -P $script:SqlPassword -I -i $schemaFile -l 30 -t 60 2>&1
+            # -l 30 = 30 second login timeout, -t 120 = 120 second query timeout
+            $output = & sqlcmd -S $serverFqdn -d $SqlDatabaseName -U $SqlUsername -P $script:SqlPassword -I -i $schemaFile -l 30 -t 120 2>&1
             $output | ForEach-Object { Write-Host "   $_" -ForegroundColor Gray }
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "SQL Schema applied successfully!"
@@ -358,22 +375,6 @@ function Update-SqlSchema {
         }
         catch {
             Write-Host "   sqlcmd failed: $_" -ForegroundColor Yellow
-        }
-    }
-
-    # Try Invoke-Sqlcmd (SqlServer PowerShell module)
-    if (Get-Command Invoke-Sqlcmd -ErrorAction SilentlyContinue) {
-        Write-Host "   Using Invoke-Sqlcmd..." -ForegroundColor Gray
-        try {
-            $result = Invoke-Sqlcmd -ServerInstance $serverFqdn -Database $SqlDatabaseName `
-                -Username $SqlUsername -Password $script:SqlPassword `
-                -InputFile $schemaFile -TrustServerCertificate `
-                -ConnectionTimeout 30 -QueryTimeout 60 -ErrorAction Stop -Verbose
-            Write-Success "SQL Schema applied successfully!"
-            return $true
-        }
-        catch {
-            Write-Host "   Invoke-Sqlcmd failed: $_" -ForegroundColor Yellow
         }
     }
 

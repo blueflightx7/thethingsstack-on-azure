@@ -29,9 +29,10 @@ const useStyles = makeStyles({
   },
   heroTitle: {
     color: 'white',
-    marginBottom: '16px',
+    marginBottom: '24px',
     fontSize: '32px',
     fontWeight: 700,
+    display: 'block',
   },
   heroSubtitle: {
     color: 'rgba(255, 255, 255, 0.9)',
@@ -39,6 +40,8 @@ const useStyles = makeStyles({
     maxWidth: '700px',
     margin: '0 auto',
     lineHeight: 1.6,
+    display: 'block',
+    marginTop: '8px',
   },
   section: {
     marginBottom: '48px',
@@ -419,7 +422,7 @@ export function AboutPage() {
               This entire monitoring system is open source. Deploy your own beehive 
               monitoring on Azure using our Infrastructure-as-Code templates.
               <br /><br />
-              <a href="https://github.com/kartben/thethingsstack-on-azure" target="_blank" rel="noopener noreferrer">
+              <a href="https://github.com/blueflightx7/thethingsstack-on-azure" target="_blank" rel="noopener noreferrer">
                 View on GitHub →
               </a>
             </Text>

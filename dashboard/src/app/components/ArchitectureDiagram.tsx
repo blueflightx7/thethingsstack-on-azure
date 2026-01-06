@@ -12,8 +12,10 @@ import {
 import {
   Card,
 } from '@fluentui/react-card';
+import { Button } from '@fluentui/react-button';
 import { tokens } from '@fluentui/react-theme';
 import { Tooltip } from '@fluentui/react-tooltip';
+import { Dismiss20Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   container: {
@@ -27,6 +29,7 @@ const useStyles = makeStyles({
     border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
     boxShadow: tokens.shadow8,
     borderRadius: tokens.borderRadiusLarge,
+    position: 'relative',
   },
   header: {
     display: 'flex',
@@ -60,10 +63,39 @@ const useStyles = makeStyles({
     height: 'auto',
   },
   detailCard: {
-    marginTop: '16px',
-    ...shorthands.padding('16px'),
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderRadius: tokens.borderRadiusMedium,
+    position: 'absolute',
+    top: '50%',
+    right: '24px',
+    transform: 'translateY(-50%)',
+    width: '300px',
+    maxWidth: '90vw',
+    ...shorthands.padding('20px'),
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusLarge,
+    boxShadow: tokens.shadow16,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorBrandStroke1}`,
+    zIndex: 100,
+    animation: 'slideIn 0.2s ease-out',
+    '@keyframes slideIn': {
+      from: {
+        opacity: 0,
+        transform: 'translateY(-50%) translateX(20px)',
+      },
+      to: {
+        opacity: 1,
+        transform: 'translateY(-50%) translateX(0)',
+      },
+    },
+  },
+  detailClose: {
+    position: 'absolute',
+    top: '8px',
+    right: '8px',
+    cursor: 'pointer',
+    color: tokens.colorNeutralForeground3,
+    ':hover': {
+      color: tokens.colorNeutralForeground1,
+    },
   },
   detailHeader: {
     display: 'flex',
@@ -484,6 +516,14 @@ export const ArchitectureDiagram = () => {
 
         {selectedComponent && componentData[selectedComponent] && (
           <div className={styles.detailCard}>
+            <Button
+              className={styles.detailClose}
+              appearance="subtle"
+              icon={<Dismiss20Regular />}
+              size="small"
+              onClick={() => setSelectedComponent(null)}
+              aria-label="Close details"
+            />
             <div className={styles.detailHeader}>
               <div>
                 <Text className={styles.detailTitle}>{componentData[selectedComponent].name}</Text>

@@ -315,6 +315,103 @@ const useStyles = makeStyles({
     fontSize: '12px',
     color: tokens.colorNeutralForeground2,
   },
+  // A/V Section styles
+  avSection: {
+    marginTop: '32px',
+    ...shorthands.padding('24px'),
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusLarge,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
+    boxShadow: tokens.shadow4,
+  },
+  avHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '20px',
+  },
+  avTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('12px'),
+  },
+  avGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+    ...shorthands.gap('20px'),
+    '@media (max-width: 900px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  videoContainer: {
+    position: 'relative',
+    backgroundColor: '#000',
+    borderRadius: tokens.borderRadiusMedium,
+    overflow: 'hidden',
+    aspectRatio: '16 / 9',
+  },
+  videoPlaceholder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    color: 'white',
+    ...shorthands.gap('12px'),
+  },
+  videoIcon: {
+    fontSize: '48px',
+    opacity: 0.7,
+  },
+  videoLabel: {
+    fontSize: '14px',
+    opacity: 0.8,
+    textAlign: 'center',
+  },
+  audioCard: {
+    ...shorthands.padding('16px'),
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusMedium,
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('16px'),
+  },
+  audioIcon: {
+    fontSize: '32px',
+    color: tokens.colorBrandForeground1,
+  },
+  audioInfo: {
+    flex: 1,
+  },
+  audioTitle: {
+    fontWeight: 600,
+    marginBottom: '4px',
+  },
+  audioStatus: {
+    fontSize: '12px',
+    color: tokens.colorNeutralForeground3,
+  },
+  waveform: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('2px'),
+    height: '40px',
+  },
+  waveformBar: {
+    width: '4px',
+    backgroundColor: tokens.colorBrandForeground1,
+    borderRadius: '2px',
+    animation: 'waveform 0.5s ease-in-out infinite',
+    '@keyframes waveform': {
+      '0%, 100%': { height: '20%' },
+      '50%': { height: '100%' },
+    },
+  },
 });
 
 interface ApiaryViewProps {
@@ -589,6 +686,96 @@ export function ApiaryView({ onHiveSelect }: ApiaryViewProps) {
             </Card>
           );
         })}
+      </div>
+
+      {/* A/V Section */}
+      <div className={styles.avSection}>
+        <div className={styles.avHeader}>
+          <div className={styles.avTitle}>
+            <span style={{ fontSize: '28px' }}>📹</span>
+            <div>
+              <Title3>Live Apiary Feeds</Title3>
+              <Text className={styles.subtitle}>Video streams and audio monitoring</Text>
+            </div>
+          </div>
+        </div>
+        
+        <div className={styles.avGrid}>
+          {/* Video Feed 1 */}
+          <div className={styles.videoContainer}>
+            <div className={styles.videoPlaceholder}>
+              <span className={styles.videoIcon}>📷</span>
+              <span className={styles.videoLabel}>
+                Hive Entrance Camera<br />
+                <small style={{ opacity: 0.6 }}>Stream URL not configured</small>
+              </span>
+            </div>
+            {/* Video element for HLS/RTSP stream would go here:
+            <video 
+              src="https://example.com/stream.m3u8" 
+              autoPlay 
+              muted 
+              playsInline
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            /> */}
+          </div>
+
+          {/* Video Feed 2 */}
+          <div className={styles.videoContainer}>
+            <div className={styles.videoPlaceholder}>
+              <span className={styles.videoIcon}>📷</span>
+              <span className={styles.videoLabel}>
+                Apiary Overview Camera<br />
+                <small style={{ opacity: 0.6 }}>Stream URL not configured</small>
+              </span>
+            </div>
+          </div>
+
+          {/* Audio Monitoring Cards */}
+          <div className={styles.audioCard}>
+            <span className={styles.audioIcon}>🔊</span>
+            <div className={styles.audioInfo}>
+              <Text className={styles.audioTitle}>Hive Audio Analysis</Text>
+              <Text className={styles.audioStatus}>
+                Analyzing buzzing patterns for queen presence detection
+              </Text>
+            </div>
+            <div className={styles.waveform}>
+              {[...Array(8)].map((_, i) => (
+                <div 
+                  key={i}
+                  className={styles.waveformBar}
+                  style={{ 
+                    animationDelay: `${i * 0.1}s`,
+                    height: `${20 + Math.random() * 60}%`
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className={styles.audioCard}>
+            <span className={styles.audioIcon}>🎵</span>
+            <div className={styles.audioInfo}>
+              <Text className={styles.audioTitle}>Frequency Spectrum</Text>
+              <Text className={styles.audioStatus}>
+                450-500 Hz range indicates healthy colony activity
+              </Text>
+            </div>
+            <div className={styles.waveform}>
+              {[...Array(8)].map((_, i) => (
+                <div 
+                  key={i}
+                  className={styles.waveformBar}
+                  style={{ 
+                    animationDelay: `${i * 0.15}s`,
+                    height: `${30 + Math.random() * 50}%`
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

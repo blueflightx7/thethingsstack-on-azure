@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, TouchEvent } from 'react';
 import { makeStyles, shorthands, mergeClasses } from '@griffel/react';
 import { tokens } from '@fluentui/react-theme';
 import { Text, Title1, Title2, Title3 } from '@fluentui/react-text';
-import { Button } from '@fluentui/react-button';
+import { Button, ToggleButton } from '@fluentui/react-button';
 import { Badge } from '@fluentui/react-badge';
 import { Spinner } from '@fluentui/react-spinner';
+import { Tooltip } from '@fluentui/react-tooltip';
 import { 
   Dismiss24Regular,
   FullScreenMaximize24Regular,
@@ -14,12 +15,23 @@ import {
   ArrowRight24Regular,
   Pause24Regular,
   Play24Regular,
+  WeatherMoon20Regular,
+  WeatherSunny20Regular,
+  Grid20Regular,
+  DataBarVertical20Regular,
+  ResizeLarge20Regular,
+  ResizeSmall20Regular,
+  Home20Regular,
+  Info20Regular,
+  Organization20Regular,
 } from '@fluentui/react-icons';
 import { fetchJson, OverviewResponse, OverviewHive } from '../lib/api';
 import { UnitPreferencesProvider, useUnitPreferences } from '../contexts/UnitPreferencesContext';
 import { celsiusToFahrenheit, milligramsToKg, milligramsToLbs } from '../lib/units';
 import { hubColors, getTemperatureColor, getHiveStatusFromTemp, hiveStatusColors } from '../lib/theme';
 import { HiveMap, HiveLocation } from '../components/map/HiveMap';
+import { useSwipeGesture, useScreenSize } from '../hooks/useSwipeGesture';
+import { useThemeMode } from '../providers';
 
 const useStyles = makeStyles({
   container: {
@@ -29,6 +41,11 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     color: '#ffffff',
     overflow: 'hidden',
+    touchAction: 'pan-y', // Enable vertical scroll, detect horizontal swipe
+  },
+  containerLight: {
+    backgroundColor: '#f5f5f5',
+    color: '#1a1a1a',
   },
   header: {
     display: 'flex',
@@ -37,6 +54,11 @@ const useStyles = makeStyles({
     ...shorthands.padding('16px', '32px'),
     background: `linear-gradient(135deg, ${hubColors.primary} 0%, ${hubColors.primaryDark} 100%)`,
     borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+    flexWrap: 'wrap',
+    ...shorthands.gap('12px'),
+    '@media (max-width: 768px)': {
+      ...shorthands.padding('12px', '16px'),
+    },
   },
   headerLeft: {
     display: 'flex',
@@ -71,6 +93,9 @@ const useStyles = makeStyles({
     fontSize: '14px',
     color: 'rgba(255, 255, 255, 0.8)',
   },
+  brandSubtitleLight: {
+    color: 'rgba(0, 0, 0, 0.6)',
+  },
   controls: {
     display: 'flex',
     alignItems: 'center',
@@ -81,8 +106,14 @@ const useStyles = makeStyles({
     color: '#ffffff',
     ...shorthands.border('none'),
     ...shorthands.borderRadius('8px'),
+    minWidth: '44px',
+    minHeight: '44px', // Touch-friendly minimum size
     ':hover': {
       backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    },
+    '@media (min-width: 1920px)': {
+      minWidth: '56px',
+      minHeight: '56px',
     },
   },
   exitButton: {
@@ -90,9 +121,117 @@ const useStyles = makeStyles({
     color: '#ffffff',
     ...shorthands.border('none'),
     ...shorthands.borderRadius('8px'),
+    minWidth: '44px',
+    minHeight: '44px',
     ':hover': {
       backgroundColor: 'rgba(255, 0, 0, 0.3)',
     },
+  },
+  // View mode toggle
+  viewModeToggle: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('4px'),
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    ...shorthands.borderRadius('8px'),
+    ...shorthands.padding('4px'),
+  },
+  viewModeButton: {
+    backgroundColor: 'transparent',
+    color: 'rgba(255, 255, 255, 0.7)',
+    minWidth: '40px',
+    minHeight: '40px',
+    ...shorthands.border('none'),
+    ...shorthands.borderRadius('6px'),
+    ':hover': {
+      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+      color: 'white',
+    },
+  },
+  viewModeButtonActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    color: 'white',
+  },
+  // Size selector
+  sizeSelector: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap('8px'),
+    '@media (max-width: 1200px)': {
+      display: 'none',
+    },
+  },
+  sizeLabel: {
+    fontSize: '12px',
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  sizeButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    color: 'rgba(255, 255, 255, 0.8)',
+    minWidth: '36px',
+    minHeight: '36px',
+    fontSize: '12px',
+    fontWeight: 600,
+    ...shorthands.border('none'),
+    ...shorthands.borderRadius('6px'),
+    ':hover': {
+      backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    },
+  },
+  sizeButtonActive: {
+    backgroundColor: hubColors.primary,
+    color: 'white',
+  },
+  // Touch navigation overlay
+  touchNavArea: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: '80px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0,
+    transition: 'opacity 0.2s',
+    cursor: 'pointer',
+    zIndex: 10,
+    '@media (hover: hover)': {
+      ':hover': {
+        opacity: 0.8,
+      },
+    },
+  },
+  touchNavLeft: {
+    left: 0,
+    background: 'linear-gradient(90deg, rgba(0,0,0,0.5) 0%, transparent 100%)',
+  },
+  touchNavRight: {
+    right: 0,
+    background: 'linear-gradient(-90deg, rgba(0,0,0,0.5) 0%, transparent 100%)',
+  },
+  touchNavIcon: {
+    fontSize: '48px',
+    color: 'white',
+  },
+  // Swipe indicator
+  swipeIndicator: {
+    position: 'fixed',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    ...shorthands.padding('16px', '24px'),
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    ...shorthands.borderRadius('12px'),
+    color: 'white',
+    fontSize: '18px',
+    fontWeight: 600,
+    zIndex: 100,
+    pointerEvents: 'none',
+  },
+  swipeLeft: {
+    right: '20px',
+  },
+  swipeRight: {
+    left: '20px',
   },
   main: {
     flex: 1,
@@ -143,6 +282,11 @@ const useStyles = makeStyles({
     border: '1px solid rgba(255, 255, 255, 0.1)',
     textAlign: 'center',
   },
+  statCardLight: {
+    backgroundColor: 'white',
+    border: '1px solid #e0e0e0',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+  },
   statCardFHD: {
     ...shorthands.padding('16px'),
     ...shorthands.borderRadius('12px'),
@@ -163,6 +307,9 @@ const useStyles = makeStyles({
     textTransform: 'uppercase',
     letterSpacing: '1px',
   },
+  statLabelLight: {
+    color: 'rgba(0, 0, 0, 0.6)',
+  },
   statLabelFHD: {
     fontSize: '12px',
   },
@@ -174,6 +321,11 @@ const useStyles = makeStyles({
     ...shorthands.borderRadius('16px'),
     ...shorthands.padding('24px'),
     border: '1px solid rgba(255, 255, 255, 0.1)',
+  },
+  hiveSectionLight: {
+    backgroundColor: 'white',
+    border: '1px solid #e0e0e0',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
   },
   hiveSectionFHD: {
     ...shorthands.padding('16px'),
@@ -192,6 +344,9 @@ const useStyles = makeStyles({
     fontSize: '32px',
     fontWeight: '700',
     color: '#ffffff',
+  },
+  hiveNameLight: {
+    color: '#1a1a1a',
   },
   hiveNameFHD: {
     fontSize: '24px',
@@ -401,6 +556,8 @@ type ExtendedHive = OverviewHive & {
 function KioskContent() {
   const styles = useStyles();
   const { temperatureUnit, weightUnit } = useUnitPreferences();
+  const { isDark, setMode } = useThemeMode();
+  const screenSize = useScreenSize();
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentHiveIndex, setCurrentHiveIndex] = useState(0);
@@ -408,6 +565,12 @@ function KioskContent() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFHD, setIsFHD] = useState(false);
+  const [viewMode, setViewMode] = useState<'heroes' | 'charts'>('heroes');
+  const [tileSize, setTileSize] = useState<'small' | 'medium' | 'large' | 'xlarge'>('medium');
+  const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
+
+  // Toggle theme helper
+  const toggleTheme = () => setMode(isDark ? 'light' : 'dark');
 
   // Check screen resolution
   useEffect(() => {
@@ -455,6 +618,31 @@ function KioskContent() {
     }, 10000);
     return () => clearInterval(timer);
   }, [isPaused, data?.hives.length]);
+
+  // Swipe gesture navigation
+  const navigatePrev = () => {
+    if (hives.length > 0) {
+      setCurrentHiveIndex(prev => (prev - 1 + hives.length) % hives.length);
+      setSwipeDirection('right');
+      setTimeout(() => setSwipeDirection(null), 500);
+    }
+  };
+
+  const navigateNext = () => {
+    if (hives.length > 0) {
+      setCurrentHiveIndex(prev => (prev + 1) % hives.length);
+      setSwipeDirection('left');
+      setTimeout(() => setSwipeDirection(null), 500);
+    }
+  };
+
+  const swipeHandlers = useSwipeGesture({
+    onSwipeLeft: navigateNext,
+    onSwipeRight: navigatePrev,
+  }, { threshold: 50 });
+
+  // Toggle view mode
+  const toggleViewMode = () => setViewMode(prev => prev === 'heroes' ? 'charts' : 'heroes');
 
   const hives = useMemo((): ExtendedHive[] => {
     if (!data?.hives) return [];
@@ -578,7 +766,19 @@ function KioskContent() {
   const status = getStatus();
 
   return (
-    <div className={styles.container}>
+    <div 
+      className={mergeClasses(styles.container, !isDark && styles.containerLight)}
+      {...swipeHandlers}
+    >
+      {/* Swipe indicator */}
+      {swipeDirection && (
+        <div className={mergeClasses(
+          styles.swipeIndicator,
+          swipeDirection === 'left' ? styles.swipeLeft : styles.swipeRight
+        )}>
+          {swipeDirection === 'left' ? '→ Next Hive' : '← Previous Hive'}
+        </div>
+      )}
       {/* Header */}
       <header className={styles.header}>
         <div className={styles.headerLeft}>
@@ -596,6 +796,44 @@ function KioskContent() {
           </div>
         </div>
         <div className={styles.controls}>
+          {/* Theme Toggle */}
+          <Tooltip content={isDark ? 'Switch to light mode' : 'Switch to dark mode'} relationship="label">
+            <Button
+              className={styles.controlButton}
+              icon={isDark ? <WeatherSunny20Regular /> : <WeatherMoon20Regular />}
+              onClick={toggleTheme}
+            />
+          </Tooltip>
+          {/* View Mode Toggle */}
+          <div className={styles.viewModeToggle}>
+            <Tooltip content="Hero cards view" relationship="label">
+              <Button
+                className={mergeClasses(styles.viewModeButton, viewMode === 'heroes' && styles.sizeButtonActive)}
+                icon={<Grid20Regular />}
+                onClick={() => setViewMode('heroes')}
+              />
+            </Tooltip>
+            <Tooltip content="Charts view" relationship="label">
+              <Button
+                className={mergeClasses(styles.viewModeButton, viewMode === 'charts' && styles.sizeButtonActive)}
+                icon={<DataBarVertical20Regular />}
+                onClick={() => setViewMode('charts')}
+              />
+            </Tooltip>
+          </div>
+          {/* Size Selector */}
+          <div className={styles.sizeSelector}>
+            <span className={styles.sizeLabel}>Size:</span>
+            {(['small', 'medium', 'large', 'xlarge'] as const).map(size => (
+              <Button
+                key={size}
+                className={mergeClasses(styles.sizeButton, tileSize === size && styles.sizeButtonActive)}
+                onClick={() => setTileSize(size)}
+              >
+                {size[0].toUpperCase()}
+              </Button>
+            ))}
+          </div>
           <Button
             className={styles.controlButton}
             icon={isPaused ? <Play24Regular /> : <Pause24Regular />}
@@ -623,37 +861,37 @@ function KioskContent() {
         <div className={mergeClasses(styles.leftPanel, isFHD && styles.leftPanelFHD)}>
           {/* Stats Row */}
           <div className={mergeClasses(styles.statsGrid, isFHD && styles.statsGridFHD)}>
-            <div className={mergeClasses(styles.statCard, isFHD && styles.statCardFHD)}>
+            <div className={mergeClasses(styles.statCard, isFHD && styles.statCardFHD, !isDark && styles.statCardLight)}>
               <div className={mergeClasses(styles.statValue, isFHD && styles.statValueFHD)} style={{ color: hubColors.primary }}>
                 {data?.activeDevices ?? 0}
               </div>
-              <div className={mergeClasses(styles.statLabel, isFHD && styles.statLabelFHD)}>Active Hives</div>
+              <div className={mergeClasses(styles.statLabel, isFHD && styles.statLabelFHD, !isDark && styles.statLabelLight)}>Active Hives</div>
             </div>
-            <div className={mergeClasses(styles.statCard, isFHD && styles.statCardFHD)}>
+            <div className={mergeClasses(styles.statCard, isFHD && styles.statCardFHD, !isDark && styles.statCardLight)}>
               <div className={mergeClasses(styles.statValue, isFHD && styles.statValueFHD)} style={{ color: '#22c55e' }}>
                 {data?.gatewaysOnline ?? 0}
               </div>
-              <div className={mergeClasses(styles.statLabel, isFHD && styles.statLabelFHD)}>Gateways Online</div>
+              <div className={mergeClasses(styles.statLabel, isFHD && styles.statLabelFHD, !isDark && styles.statLabelLight)}>Gateways Online</div>
             </div>
-            <div className={mergeClasses(styles.statCard, isFHD && styles.statCardFHD)}>
+            <div className={mergeClasses(styles.statCard, isFHD && styles.statCardFHD, !isDark && styles.statCardLight)}>
               <div className={mergeClasses(styles.statValue, isFHD && styles.statValueFHD)} style={{ color: '#a855f7' }}>
                 {data?.messagesToday ?? 0}
               </div>
-              <div className={mergeClasses(styles.statLabel, isFHD && styles.statLabelFHD)}>Messages Today</div>
+              <div className={mergeClasses(styles.statLabel, isFHD && styles.statLabelFHD, !isDark && styles.statLabelLight)}>Messages Today</div>
             </div>
-            <div className={mergeClasses(styles.statCard, isFHD && styles.statCardFHD)}>
+            <div className={mergeClasses(styles.statCard, isFHD && styles.statCardFHD, !isDark && styles.statCardLight)}>
               <div className={mergeClasses(styles.statValue, isFHD && styles.statValueFHD)} style={{ color: '#f59e0b' }}>
                 {hives.length}
               </div>
-              <div className={mergeClasses(styles.statLabel, isFHD && styles.statLabelFHD)}>Total Hives</div>
+              <div className={mergeClasses(styles.statLabel, isFHD && styles.statLabelFHD, !isDark && styles.statLabelLight)}>Total Hives</div>
             </div>
           </div>
 
           {/* Hive Detail Section */}
-          <div className={mergeClasses(styles.hiveSection, isFHD && styles.hiveSectionFHD)}>
+          <div className={mergeClasses(styles.hiveSection, isFHD && styles.hiveSectionFHD, !isDark && styles.hiveSectionLight)}>
             <div className={mergeClasses(styles.hiveHeader, isFHD && styles.hiveHeaderFHD)}>
               <div style={{ display: 'flex', alignItems: 'center' }}>
-                <span className={mergeClasses(styles.hiveName, isFHD && styles.hiveNameFHD)}>
+                <span className={mergeClasses(styles.hiveName, isFHD && styles.hiveNameFHD, !isDark && styles.hiveNameLight)}>
                   🏠 {currentHive?.hiveName || `Hive ${currentHiveIndex + 1}`}
                 </span>
                 <Badge color={status.color} className={styles.statusBadge}>
