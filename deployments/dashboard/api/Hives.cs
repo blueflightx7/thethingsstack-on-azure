@@ -147,7 +147,9 @@ public sealed class Hives
                 COALESCE(hl.Latitude, m.Latitude) AS ResolvedLatitude,
                 COALESCE(hl.Longitude, m.Longitude) AS ResolvedLongitude,
                 hl.Label AS LocationLabel,
-                g.GatewayIdentifier
+                g.GatewayIdentifier,
+                m.Temperature_Inner_F,
+                m.Temperature_Outer_F
             FROM Devices d
             LEFT JOIN HiveLocations hl ON hl.HiveIdentity = d.HiveIdentity
             OUTER APPLY (
@@ -179,6 +181,8 @@ public sealed class Hives
             {
                 temperatureInner = reader.IsDBNull(6) ? (decimal?)null : reader.GetDecimal(6),
                 temperatureOuter = reader.IsDBNull(7) ? (decimal?)null : reader.GetDecimal(7),
+                temperatureInnerF = reader.IsDBNull(25) ? (decimal?)null : reader.GetDecimal(25),
+                temperatureOuterF = reader.IsDBNull(26) ? (decimal?)null : reader.GetDecimal(26),
                 humidity = reader.IsDBNull(8) ? (decimal?)null : reader.GetDecimal(8),
                 weightKg = reader.IsDBNull(9) ? (decimal?)null : reader.GetDecimal(9),
                 batteryVoltage = reader.IsDBNull(10) ? (decimal?)null : reader.GetDecimal(10),
@@ -232,7 +236,9 @@ public sealed class Hives
                 m.FFT_Bin_378_429,
                 m.FFT_Bin_429_480,
                 m.FFT_Bin_480_532,
-                m.FFT_Bin_532_583
+                m.FFT_Bin_532_583,
+                m.Temperature_Inner_F,
+                m.Temperature_Outer_F
             FROM Measurements m
             INNER JOIN Devices d ON d.DeviceID = m.DeviceID
             WHERE d.HiveIdentity = @HiveIdentity
@@ -254,6 +260,8 @@ public sealed class Hives
                 timestamp = reader.GetDateTime(0).ToUniversalTime(),
                 temperatureInner = reader.IsDBNull(1) ? (decimal?)null : reader.GetDecimal(1),
                 temperatureOuter = reader.IsDBNull(2) ? (decimal?)null : reader.GetDecimal(2),
+                temperatureInnerF = reader.IsDBNull(26) ? (decimal?)null : reader.GetDecimal(26),
+                temperatureOuterF = reader.IsDBNull(27) ? (decimal?)null : reader.GetDecimal(27),
                 humidity = reader.IsDBNull(3) ? (decimal?)null : reader.GetDecimal(3),
                 weightKg = reader.IsDBNull(4) ? (decimal?)null : reader.GetDecimal(4),
                 batteryVoltage = reader.IsDBNull(5) ? (decimal?)null : reader.GetDecimal(5),

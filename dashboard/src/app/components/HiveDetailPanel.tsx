@@ -248,8 +248,15 @@ export function HiveDetailPanel({ hiveIdentity }: { hiveIdentity: string | null 
     return series.map(p => ({
       ...p,
       timestamp: p.timestamp,
+      // Use native Fahrenheit from database when unit preference is fahrenheit
+      temperatureInner: temperatureUnit === 'fahrenheit' 
+        ? (p.temperatureInnerF ?? p.temperatureInner) 
+        : p.temperatureInner,
+      temperatureOuter: temperatureUnit === 'fahrenheit' 
+        ? (p.temperatureOuterF ?? p.temperatureOuter) 
+        : p.temperatureOuter,
     }));
-  }, [series]);
+  }, [series, temperatureUnit]);
 
   if (!hiveIdentity) {
     return (
@@ -304,12 +311,14 @@ export function HiveDetailPanel({ hiveIdentity }: { hiveIdentity: string | null 
       <div className={styles.heroSection}>
         <TemperatureHero
           current={detail?.telemetry?.temperatureInner as number | null | undefined}
+          currentF={detail?.telemetry?.temperatureInnerF as number | null | undefined}
           label="Brood Chamber"
           type="brood"
           unit={temperatureUnit}
         />
         <TemperatureHero
           current={detail?.telemetry?.temperatureOuter as number | null | undefined}
+          currentF={detail?.telemetry?.temperatureOuterF as number | null | undefined}
           label="Ambient"
           unit={temperatureUnit}
         />

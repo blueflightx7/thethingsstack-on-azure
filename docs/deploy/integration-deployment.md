@@ -462,6 +462,24 @@ Configuration helper generated: deployments/integration/configure-tts-webhook.sh
 
 ---
 
+## Updating Code Only (No Infrastructure)
+
+If you need to update just the ProcessToSQL function code (e.g., fix a bug, add new fields), use the unified update script instead of re-running the full deployment:
+
+```powershell
+# Interactive menu
+.\deployments\update.ps1
+
+# Or direct command for Function only
+.\deployments\update.ps1 -Component Function
+```
+
+This is faster (~30 seconds) than a full deployment and only updates the code, not infrastructure or app settings.
+
+See [Update Guide](update-guide.md) for all update options including SQL schema updates.
+
+---
+
 ## Post-Deployment Configuration
 
 ### Step 1: Configure TTS Webhook

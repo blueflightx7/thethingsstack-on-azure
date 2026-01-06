@@ -177,7 +177,22 @@ export function getTemperatureColor(tempC: number | null | undefined): string {
 }
 
 // Get hive status from temperature
-export function getHiveStatusFromTemp(tempC: number | null | undefined): 'healthy' | 'warning' | 'critical' | 'unknown' {
+// Can use either Fahrenheit (preferred, from database) or Celsius (fallback)
+// Brood temperature thresholds:
+// - Healthy: 91-97°F (33-36°C) - ideal brood temperature
+// - Warning: 86-100°F (30-38°C) - slightly off but acceptable
+// - Critical: outside warning range - too hot or too cold
+export function getHiveStatusFromTemp(
+  tempC: number | null | undefined,
+  tempF?: number | null | undefined
+): 'healthy' | 'warning' | 'critical' | 'unknown' {
+  // Prefer Fahrenheit from database if available
+  if (tempF != null) {
+    if (tempF >= 91 && tempF <= 97) return 'healthy'; // Ideal brood temperature
+    if (tempF >= 86 && tempF <= 100) return 'warning'; // Slightly off
+    return 'critical'; // Too hot or too cold
+  }
+  // Fallback to Celsius
   if (tempC == null) return 'unknown';
   if (tempC >= 33 && tempC <= 36) return 'healthy'; // Ideal brood temperature
   if (tempC >= 30 && tempC <= 38) return 'warning'; // Slightly off

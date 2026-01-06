@@ -94,7 +94,8 @@ const useStyles = makeStyles({
 });
 
 interface TemperatureHeroProps {
-  current: number | null | undefined; // Always in Celsius
+  current: number | null | undefined; // Temperature in Celsius
+  currentF?: number | null | undefined; // Temperature in Fahrenheit (from database, preferred when available)
   type?: 'brood' | 'winter';
   trend?: number | null; // Change per hour
   label?: string;
@@ -104,6 +105,7 @@ interface TemperatureHeroProps {
 
 export function TemperatureHero({
   current,
+  currentF,
   type = 'brood',
   trend,
   label = 'Temperature',
@@ -120,11 +122,17 @@ export function TemperatureHero({
 
   const alertColor = alertColors[alertLevel];
   
-  // Convert to display unit
+  // Convert to display unit - use native Fahrenheit from database when available
   const displayValue = useMemo(() => {
-    if (current == null) return null;
-    return unit === 'fahrenheit' ? (current * 9/5) + 32 : current;
-  }, [current, unit]);
+    if (unit === 'fahrenheit') {
+      // Prefer native Fahrenheit from database
+      if (currentF != null) return currentF;
+      // Fallback to conversion
+      if (current != null) return (current * 9/5) + 32;
+      return null;
+    }
+    return current ?? null;
+  }, [current, currentF, unit]);
 
   // Calculate gauge angles (semi-circle from -90 to 90 degrees)
   const gaugeData = useMemo(() => {

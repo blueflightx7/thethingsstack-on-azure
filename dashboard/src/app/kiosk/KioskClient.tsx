@@ -390,6 +390,7 @@ const useStyles = makeStyles({
 
 type ExtendedHive = OverviewHive & {
   latestTemperature: number | null;
+  latestTemperatureF: number | null;
   latestWeight: number | null;
   latestHumidity: number | null;
   latestBattery: number | null;
@@ -462,6 +463,7 @@ function KioskContent() {
       .map(h => ({
         ...h,
         latestTemperature: h.telemetry?.temperatureInner ?? null,
+        latestTemperatureF: h.telemetry?.temperatureInnerF ?? null,
         latestWeight: h.telemetry?.weightKg ? h.telemetry.weightKg * 1000000 : null,
         latestHumidity: h.telemetry?.humidity ?? null,
         latestBattery: h.telemetry?.batteryPercent ?? null,
@@ -482,11 +484,18 @@ function KioskContent() {
     }));
   }, [hives]);
 
-  const formatTemp = (tempC: number | null | undefined): string => {
-    if (tempC == null) return '—';
+  // Use native Fahrenheit from database when available, fallback to conversion
+  const formatTemp = (tempC: number | null | undefined, tempF?: number | null | undefined): string => {
     if (temperatureUnit === 'fahrenheit') {
-      return `${celsiusToFahrenheit(tempC).toFixed(0)}°F`;
+      if (tempF != null) {
+        return `${tempF.toFixed(0)}°F`;
+      }
+      if (tempC != null) {
+        return `${celsiusToFahrenheit(tempC).toFixed(0)}°F`;
+      }
+      return '—';
     }
+    if (tempC == null) return '—';
     return `${tempC.toFixed(0)}°C`;
   };
 
@@ -546,7 +555,7 @@ function KioskContent() {
 
   const getStatus = () => {
     if (!currentHive) return { color: 'informative' as const, label: 'No Data' };
-    const status = getHiveStatusFromTemp(currentHive.latestTemperature);
+    const status = getHiveStatusFromTemp(currentHive.latestTemperature, currentHive.latestTemperatureF);
     const config = {
       healthy: { color: 'success' as const, label: 'Healthy' },
       warning: { color: 'warning' as const, label: 'Warning' },
@@ -677,7 +686,7 @@ function KioskContent() {
                   className={mergeClasses(styles.metricValue, isFHD && styles.metricValueFHD)}
                   style={{ color: currentHive?.latestTemperature ? getTemperatureColor(currentHive.latestTemperature) : '#888' }}
                 >
-                  {formatTemp(currentHive?.latestTemperature)}
+                  {formatTemp(currentHive?.latestTemperature, currentHive?.latestTemperatureF)}
                 </span>
                 <span className={mergeClasses(styles.metricLabel, isFHD && styles.metricLabelFHD)}>Temperature</span>
               </div>

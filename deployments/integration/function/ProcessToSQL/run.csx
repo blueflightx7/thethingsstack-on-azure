@@ -214,13 +214,18 @@ public static async Task Run(string[] eventHubMessages, ILogger log)
                     : DateTime.Parse(receivedAtStr).ToUniversalTime();
 
                 // Extract sensor values (beehive-specific)
-                decimal? tempInner = GetDecimalValue(decodedPayload, "t_i");
-                decimal? tempOuter = GetDecimalValue(decodedPayload, "t_o");
+                // Support both BEEP Base field name variants: t_i/t_o (single sensor) AND t_0/t_1 (multi sensor)
+                decimal? tempInner = GetDecimalValue(decodedPayload, "t_i") ?? GetDecimalValue(decodedPayload, "t_0");
+                decimal? tempOuter = GetDecimalValue(decodedPayload, "t_o") ?? GetDecimalValue(decodedPayload, "t_1");
                 decimal? humidity = GetDecimalValue(decodedPayload, "h");
                 decimal? batteryVoltage = GetDecimalValue(decodedPayload, "bv");
                 int? batteryPercent = GetIntValue(decodedPayload, "bat_perc");
                 decimal? soundFrequency = GetDecimalValue(decodedPayload, "sound");
                 long? weightValue = GetLongValue(decodedPayload, "w_v");
+                
+                // Calculate Fahrenheit temperatures for storage (primary display unit)
+                decimal? tempInnerF = tempInner.HasValue ? (decimal?)((tempInner.Value * 9m / 5m) + 32m) : null;
+                decimal? tempOuterF = tempOuter.HasValue ? (decimal?)((tempOuter.Value * 9m / 5m) + 32m) : null;
                 
                 // FFT bins (sound frequency analysis)
                 int? fftBin71_122 = GetIntValue(decodedPayload, "s_bin_71_122");
@@ -360,6 +365,8 @@ public static async Task Run(string[] eventHubMessages, ILogger log)
                         receivedAtUtc,
                         tempInner,
                         tempOuter,
+                        tempInnerF,
+                        tempOuterF,
                         humidity,
                         batteryVoltage,
                         batteryPercent,
@@ -585,6 +592,8 @@ private static async Task InsertMeasurementAsync(
     DateTime timestamp,
     decimal? tempInner,
     decimal? tempOuter,
+    decimal? tempInnerF,
+    decimal? tempOuterF,
     decimal? humidity,
     decimal? batteryVoltage,
     int? batteryPercent,
@@ -608,7 +617,7 @@ private static async Task InsertMeasurementAsync(
     string query = @"
         INSERT INTO Measurements (
             DeviceID, Timestamp,
-            Temperature_Inner, Temperature_Outer, Humidity,
+            Temperature_Inner, Temperature_Outer, Temperature_Inner_F, Temperature_Outer_F, Humidity,
             Weight_KG, BatteryVoltage, BatteryPercent, SoundFrequency,
             FFT_Bin_71_122, FFT_Bin_122_173, FFT_Bin_173_224, FFT_Bin_224_276,
             FFT_Bin_276_327, FFT_Bin_327_378, FFT_Bin_378_429, FFT_Bin_429_480,
@@ -619,7 +628,7 @@ private static async Task InsertMeasurementAsync(
         )
         VALUES (
             @DeviceID, @Timestamp,
-            @Temperature_Inner, @Temperature_Outer, @Humidity,
+            @Temperature_Inner, @Temperature_Outer, @Temperature_Inner_F, @Temperature_Outer_F, @Humidity,
             @Weight_KG, @BatteryVoltage, @BatteryPercent, @SoundFrequency,
             @FFT_Bin_71_122, @FFT_Bin_122_173, @FFT_Bin_173_224, @FFT_Bin_224_276,
             @FFT_Bin_276_327, @FFT_Bin_327_378, @FFT_Bin_378_429, @FFT_Bin_429_480,
@@ -636,11 +645,15 @@ private static async Task InsertMeasurementAsync(
         command.Parameters.AddWithValue("@Timestamp", timestamp);
         command.Parameters.AddWithValue("@Temperature_Inner", tempInner ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@Temperature_Outer", tempOuter ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("@Temperature_Inner_F", tempInnerF ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("@Temperature_Outer_F", tempOuterF ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@Humidity", humidity ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@BatteryVoltage", batteryVoltage ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@BatteryPercent", batteryPercent ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@SoundFrequency", soundFrequency ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("@Weight_KG", weightValue.HasValue ? (object)(weightValue.Value / 1000.0m) : DBNull.Value);
+        // Weight: w_v is a Beep sensor scaled integer, convert to kg by dividing by 32,100
+        // Empirically determined: w_v=1765572 → 55 kg (per Beep portal calibration)
+        command.Parameters.AddWithValue("@Weight_KG", weightValue.HasValue ? (object)(weightValue.Value / 32100.0m) : DBNull.Value);
         
         command.Parameters.AddWithValue("@FFT_Bin_71_122", fftBin71_122 ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@FFT_Bin_122_173", fftBin122_173 ?? (object)DBNull.Value);

@@ -109,7 +109,9 @@ namespace DashboardApi
                     m.BatteryVoltage,
                     m.BatteryPercent,
                     m.SoundEnergyTotal,
-                    m.SoundDominantBinRange
+                    m.SoundDominantBinRange,
+                    m.Temperature_Inner_F,
+                    m.Temperature_Outer_F
                 FROM Devices d
                 LEFT JOIN HiveLocations hl ON hl.HiveIdentity = d.HiveIdentity
                 OUTER APPLY (
@@ -150,6 +152,8 @@ namespace DashboardApi
                 int? batteryPercent = reader.IsDBNull(17) ? null : reader.GetInt32(17);
                 long? soundEnergyTotal = reader.IsDBNull(18) ? null : reader.GetInt64(18);
                 string? soundDominantBinRange = reader.IsDBNull(19) ? null : reader.GetString(19);
+                decimal? temperatureInnerF = reader.IsDBNull(20) ? null : reader.GetDecimal(20);
+                decimal? temperatureOuterF = reader.IsDBNull(21) ? null : reader.GetDecimal(21);
 
                 var displayName = hiveName;
                 if (string.IsNullOrWhiteSpace(displayName)) displayName = name;
@@ -175,6 +179,8 @@ namespace DashboardApi
                     {
                         temperatureInner,
                         temperatureOuter,
+                        temperatureInnerF,
+                        temperatureOuterF,
                         humidity,
                         weightKg,
                         batteryVoltage,

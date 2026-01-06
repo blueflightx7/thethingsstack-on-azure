@@ -356,6 +356,7 @@ export function ApiaryView({ onHiveSelect }: ApiaryViewProps) {
         ...h,
         // Map telemetry to easier-to-use computed properties
         latestTemperature: h.telemetry?.temperatureInner ?? null,
+        latestTemperatureF: h.telemetry?.temperatureInnerF ?? null,
         latestWeight: h.telemetry?.weightKg ? h.telemetry.weightKg * 1000000 : null, // convert kg to mg
         latestHumidity: h.telemetry?.humidity ?? null,
         latestBattery: h.telemetry?.batteryPercent ?? null,
@@ -364,11 +365,20 @@ export function ApiaryView({ onHiveSelect }: ApiaryViewProps) {
       }));
   }, [data]);
 
-  const formatTemp = (tempC: number | null | undefined): string => {
-    if (tempC == null) return '—';
+  // Use native Fahrenheit from database when available, fallback to conversion
+  const formatTemp = (tempC: number | null | undefined, tempF?: number | null | undefined): string => {
     if (temperatureUnit === 'fahrenheit') {
-      return `${celsiusToFahrenheit(tempC).toFixed(0)}°F`;
+      // Use native Fahrenheit from database if available
+      if (tempF != null) {
+        return `${tempF.toFixed(0)}°F`;
+      }
+      // Fallback to conversion if Fahrenheit not stored
+      if (tempC != null) {
+        return `${celsiusToFahrenheit(tempC).toFixed(0)}°F`;
+      }
+      return '—';
     }
+    if (tempC == null) return '—';
     return `${tempC.toFixed(0)}°C`;
   };
 
@@ -402,6 +412,7 @@ export function ApiaryView({ onHiveSelect }: ApiaryViewProps) {
 
   type ExtendedHive = OverviewHive & {
     latestTemperature: number | null;
+    latestTemperatureF: number | null;
     latestWeight: number | null;
     latestHumidity: number | null;
     latestBattery: number | null;
@@ -410,7 +421,7 @@ export function ApiaryView({ onHiveSelect }: ApiaryViewProps) {
   };
 
   const getStatusBadge = (hive: ExtendedHive) => {
-    const status = getHiveStatusFromTemp(hive.latestTemperature);
+    const status = getHiveStatusFromTemp(hive.latestTemperature, hive.latestTemperatureF);
     const statusConfig = {
       healthy: { color: 'success' as const, label: 'Healthy' },
       warning: { color: 'warning' as const, label: 'Warning' },
@@ -527,7 +538,7 @@ export function ApiaryView({ onHiveSelect }: ApiaryViewProps) {
                 <div className={styles.tempOverlay}>
                   <span className={styles.tempIcon}>🌡️</span>
                   <span className={styles.tempValue} style={{ color: tempColor }}>
-                    {formatTemp(hive.latestTemperature)}
+                    {formatTemp(hive.latestTemperature, hive.latestTemperatureF)}
                   </span>
                 </div>
                 
