@@ -16,7 +16,7 @@ For the Dashboard API (BYO backend):
 - An existing Azure Function App (Windows, .NET 8 isolated) that will host the API
 
 Note:
-- The UI-only update script ([deployments/dashboard/update-dashboard.ps1](../../deployments/dashboard/update-dashboard.ps1)) will fail fast if required dependencies (`az`, `node`, `npm`) are missing.
+- The unified update script ([deployments/update.ps1](../../deployments/update.ps1)) will fail fast if required dependencies (`az`, `node`, `npm`) are missing.
 - If you don’t want Node.js on your workstation, use CI/CD to build/deploy the dashboard instead.
 
 Local dev (Windows + Linux):
@@ -55,15 +55,17 @@ The exported site will be under `dashboard/out`.
 
 ### 2) Deploy to Azure
 
-The update script handles the SWA CLI deployment:
+Use the unified update script:
 
 ```powershell
-.\deployments\dashboard\update-dashboard.ps1
+# Interactive menu
+.\deployments\update.ps1
+
+# Or direct command
+.\deployments\update.ps1 -Component UI
 ```
 
-You will be prompted for:
-- Resource Group Name
-- Static Web App Name (e.g., `tts-dash-xyz`)
+See [Update Guide](update-guide.md) for full options.
 
 ## Troubleshooting
 

@@ -1,0 +1,15 @@
+{
+    "IsEncrypted": false,
+    "Values": {
+        "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+        "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+        "EventHubConnectionString": "<your-eventhub-connection-string>",
+        "EventHubName": "<your-eventhub-name>",
+        "SqlConnectionString": "Server=<server>.database.windows.net;Database=<db>;User Id=<user>;Password=<password>;Encrypt=True;",
+        "BlobStorageConnectionString": "<your-blob-storage-connection-string>",
+        "IoTHubHostName": "<your-iothub>.azure-devices.net",
+        "IoTHubSharedAccessKey": "<your-shared-access-key>",
+        "IoTHubSharedAccessKeyName": "iothubowner",
+        "APPLICATIONINSIGHTS_CONNECTION_STRING": "<your-app-insights-connection-string>"
+    }
+}

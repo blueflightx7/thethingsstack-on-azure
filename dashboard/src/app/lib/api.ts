@@ -18,6 +18,8 @@ export type OverviewHive = {
   telemetry?: {
     temperatureInner?: number | null;
     temperatureOuter?: number | null;
+    temperatureInnerF?: number | null;
+    temperatureOuterF?: number | null;
     humidity?: number | null;
     weightKg?: number | null;
     batteryVoltage?: number | null;
@@ -48,6 +50,8 @@ export type HiveDetailResponse = {
   telemetry?: {
     temperatureInner?: number | null;
     temperatureOuter?: number | null;
+    temperatureInnerF?: number | null;
+    temperatureOuterF?: number | null;
     humidity?: number | null;
     weightKg?: number | null;
     batteryVoltage?: number | null;
@@ -68,6 +72,8 @@ export type HiveSeriesPoint = {
   timestamp: string;
   temperatureInner?: number | null;
   temperatureOuter?: number | null;
+  temperatureInnerF?: number | null;
+  temperatureOuterF?: number | null;
   humidity?: number | null;
   weightKg?: number | null;
   batteryVoltage?: number | null;

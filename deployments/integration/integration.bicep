@@ -343,6 +343,7 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
   properties: {
     serverFarmId: appServicePlan.id
     siteConfig: {
+      netFrameworkVersion: 'v8.0'
       appSettings: [
         {
           name: 'AzureWebJobsStorage'
@@ -362,7 +363,7 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
         }
         {
           name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'dotnet'
+          value: 'dotnet-isolated'
         }
         {
           name: 'APPINSIGHTS_INSTRUMENTATIONKEY'
@@ -379,15 +380,6 @@ resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
         {
           name: 'EventHubConnection'
           value: eventHubAuthRule.listKeys().primaryConnectionString
-        }
-        {
-          // We ship dependencies in wwwroot/bin; avoid remote build/package restore.
-          name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
-          value: 'false'
-        }
-        {
-          name: 'ENABLE_ORYX_BUILD'
-          value: 'false'
         }
       ]
     }

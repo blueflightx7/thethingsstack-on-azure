@@ -47,6 +47,19 @@ Signature (simplified):
 public static async Task Run(string[] eventHubMessages, ILogger log)
 ```
 
+## Updating the Function Code
+
+To update ProcessToSQL after code changes (e.g., fixing bugs, adding new fields):
+
+```powershell
+# Use the unified update script
+.\deployments\update.ps1 -Component Function
+```
+
+This packages the function code with dependencies and deploys via Azure CLI. No infrastructure changes are made.
+
+See [Update Guide](../deploy/update-guide.md) for full documentation.
+
 ## Dependency Packaging (Important)
 
 Azure Functions v4 C# script requires shipping certain assemblies alongside the Function and referencing them via `#r`.

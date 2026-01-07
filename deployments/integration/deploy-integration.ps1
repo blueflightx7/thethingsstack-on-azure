@@ -234,26 +234,38 @@ try {
     # Set App Setting (service connection for auto-registration)
     Write-Host "Setting IoTHubConnectionString (service-level)..." -ForegroundColor Gray
     az functionapp config appsettings set --name $functionAppName --resource-group $ResourceGroupName --settings "IoTHubConnectionString=$iotHubConnString" | Out-Null
-    # We ship dependencies in wwwroot/bin; avoid remote build/package restore.
-    az functionapp config appsettings set --name $functionAppName --resource-group $ResourceGroupName --settings "SCM_DO_BUILD_DURING_DEPLOYMENT=false" "ENABLE_ORYX_BUILD=false" | Out-Null
     
-    # Deploy Code
-    Write-Host "Deploying Function Code..." -ForegroundColor Yellow
+    # Deploy Code - Build and publish .NET 8 isolated worker project
+    Write-Host "Building and deploying Function Code (.NET 8 isolated worker)..." -ForegroundColor Yellow
     $funcDir = "$PSScriptRoot\function"
+    $publishDir = "$funcDir\publish"
     $zipPath = "$PSScriptRoot\function.zip"
 
-    # Prepare root-level dependencies for C# script functions (e.g., Microsoft.Data.SqlClient)
-    $prepDeps = Join-Path $funcDir 'prepare-deps.ps1'
-    if (Test-Path $prepDeps) {
-        Write-Host "Preparing Function dependencies..." -ForegroundColor Gray
-        & $prepDeps
+    # Build the .NET 8 project
+    Write-Host "Building .NET 8 project..." -ForegroundColor Gray
+    Push-Location $funcDir
+    try {
+        dotnet publish TtsIntegration.csproj -c Release -o $publishDir --nologo
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet publish failed with exit code $LASTEXITCODE"
+        }
+        Write-Host "✓ Build successful" -ForegroundColor Green
+    }
+    finally {
+        Pop-Location
     }
     
+    # Create deployment zip from publish output
     if (Test-Path $zipPath) { Remove-Item $zipPath }
-    Compress-Archive -Path "$funcDir\*" -DestinationPath $zipPath
+    Compress-Archive -Path "$publishDir\*" -DestinationPath $zipPath
     
+    # Deploy to Azure
+    Write-Host "Deploying to Azure Function App..." -ForegroundColor Gray
     az functionapp deployment source config-zip --resource-group $ResourceGroupName --name $functionAppName --src $zipPath
+    
+    # Cleanup
     Remove-Item $zipPath
+    Remove-Item $publishDir -Recurse -Force
 
     # Ensure triggers/routes are registered after deployment
     Write-Host "Restarting Function App and syncing triggers..." -ForegroundColor Gray
