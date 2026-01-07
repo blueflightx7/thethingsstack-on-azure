@@ -83,6 +83,8 @@ thethingsstack-on-azure.parameters.json
 !**/*.example.json
 !**/*.template.json
 !**/*.sample.json
+!**/host.json
+!**/local.settings.template.json
 
 # Bicep build outputs
 **/bicep-build/
